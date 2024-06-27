@@ -45,6 +45,7 @@ import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.plans.logical.{LocalRelation, Range}
 import org.apache.spark.sql.catalyst.types.DataTypeUtils.toAttributes
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
+import org.apache.spark.sql.catalyst.util.TypeUtils.toSQLId
 import org.apache.spark.sql.connector.ExternalCommandRunner
 import org.apache.spark.sql.errors.QueryCompilationErrors
 import org.apache.spark.sql.execution._
@@ -658,6 +659,55 @@ class SparkSession private(
    */
   def readStream: DataStreamReader = new DataStreamReader(self)
 
+<<<<<<< HEAD
+=======
+  /**
+   * Executes some code block and prints to stdout the time taken to execute the block. This is
+   * available in Scala only and is used primarily for interactive testing and debugging.
+   *
+   * @since 2.1.0
+   */
+  def time[T](f: => T): T = {
+    val start = System.nanoTime()
+    val ret = f
+    val end = System.nanoTime()
+    // scalastyle:off println
+    println(s"Time taken: ${NANOSECONDS.toMillis(end - start)} ms")
+    // scalastyle:on println
+    ret
+  }
+
+  /**
+   * Update rows in a table that match a condition.
+   *
+   * Scala Example:
+   * {{{
+   *   spark.update("source")
+   *    .set(
+   *      Map("salary" -> lit(200))
+   *    )
+   *    .where($"salary" === 100)
+   *    .execute()
+   *
+   * }}}
+   * @param tableName is either a qualified or unqualified name that designates a table or view.
+   *                  If a database is specified, it identifies the table/view from the database.
+   *                  Otherwise, it first attempts to find a temporary view with the given name
+   *                  and then match the table/view from the current database.
+   *                  Note that, the global temporary view database is also valid here.
+   * @since 4.0.0
+   */
+  def update(tableName: String): UpdateWriter = {
+    val tableDF = table(tableName)
+    if (tableDF.isStreaming) {
+      throw new AnalysisException(
+        errorClass = "CALL_ON_STREAMING_DATASET_UNSUPPORTED",
+        messageParameters = Map("methodName" -> toSQLId("update")))
+    }
+    new UpdateWriter(tableDF)
+  }
+
+>>>>>>> 056492b9040 ([SPARK-48821][SQL] Support Update in DataFrameWriterV2)
   // scalastyle:off
   // Disable style checker so "implicits" object can start with lowercase i
   /**
