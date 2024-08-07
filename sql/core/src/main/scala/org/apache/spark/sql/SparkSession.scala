@@ -45,7 +45,6 @@ import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.plans.logical.{LocalRelation, Range}
 import org.apache.spark.sql.catalyst.types.DataTypeUtils.toAttributes
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
-import org.apache.spark.sql.catalyst.util.TypeUtils.toSQLId
 import org.apache.spark.sql.connector.ExternalCommandRunner
 import org.apache.spark.sql.errors.QueryCompilationErrors
 import org.apache.spark.sql.execution._
@@ -677,6 +676,7 @@ class SparkSession private(
     ret
   }
 
+<<<<<<< HEAD
   /**
    * Update rows in a table that match a condition.
    *
@@ -708,6 +708,8 @@ class SparkSession private(
   }
 
 >>>>>>> 056492b9040 ([SPARK-48821][SQL] Support Update in DataFrameWriterV2)
+=======
+>>>>>>> a56228c4ed1 (Move API back to Dataset)
   // scalastyle:off
   // Disable style checker so "implicits" object can start with lowercase i
   /**
