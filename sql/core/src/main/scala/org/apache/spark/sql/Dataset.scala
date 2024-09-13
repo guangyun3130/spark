@@ -1663,10 +1663,10 @@ class Dataset[T] private[sql](
    *   spark.table("source")
    *    .update(Map("salary" -> lit(200)))
    *    .execute()
-   *
    * }}}
    * @param assignments A Map of column names to Column expressions representing the updates
    *     to be applied.
+   * @group basic
    * @since 4.0.0
    */
   def update(assignments: Map[String, Column]): Unit = {
@@ -1681,11 +1681,11 @@ class Dataset[T] private[sql](
    *   spark.table("source")
    *    .update(Map("salary" -> lit(200)), $"salary" === 100)
    *    .execute()
-   *
    * }}}
    * @param assignments A Map of column names to Column expressions representing the updates
    *     to be applied.
    * @param condition the update condition
+   * @group basic
    * @since 4.0.0
    */
   def update(assignments: Map[String, Column], condition: Column): Unit = {
