@@ -658,8 +658,6 @@ class SparkSession private(
    */
   def readStream: DataStreamReader = new DataStreamReader(self)
 
-<<<<<<< HEAD
-=======
   /**
    * Executes some code block and prints to stdout the time taken to execute the block. This is
    * available in Scala only and is used primarily for interactive testing and debugging.
@@ -676,40 +674,6 @@ class SparkSession private(
     ret
   }
 
-<<<<<<< HEAD
-  /**
-   * Update rows in a table that match a condition.
-   *
-   * Scala Example:
-   * {{{
-   *   spark.update("source")
-   *    .set(
-   *      Map("salary" -> lit(200))
-   *    )
-   *    .where($"salary" === 100)
-   *    .execute()
-   *
-   * }}}
-   * @param tableName is either a qualified or unqualified name that designates a table or view.
-   *                  If a database is specified, it identifies the table/view from the database.
-   *                  Otherwise, it first attempts to find a temporary view with the given name
-   *                  and then match the table/view from the current database.
-   *                  Note that, the global temporary view database is also valid here.
-   * @since 4.0.0
-   */
-  def update(tableName: String): UpdateWriter = {
-    val tableDF = table(tableName)
-    if (tableDF.isStreaming) {
-      throw new AnalysisException(
-        errorClass = "CALL_ON_STREAMING_DATASET_UNSUPPORTED",
-        messageParameters = Map("methodName" -> toSQLId("update")))
-    }
-    new UpdateWriter(tableDF)
-  }
-
->>>>>>> 056492b9040 ([SPARK-48821][SQL] Support Update in DataFrameWriterV2)
-=======
->>>>>>> a56228c4ed1 (Move API back to Dataset)
   // scalastyle:off
   // Disable style checker so "implicits" object can start with lowercase i
   /**

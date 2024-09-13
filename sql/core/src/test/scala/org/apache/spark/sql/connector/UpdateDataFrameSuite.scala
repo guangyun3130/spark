@@ -32,9 +32,7 @@ class UpdateDataFrameSuite extends RowLevelOperationSuiteBase {
         |""".stripMargin)
 
     spark.table(tableNameAsString)
-      .update(Map("salary" -> lit(-1)))
-      .where($"pk" >= 2)
-      .execute()
+      .update(Map("salary" -> lit(-1)), $"pk" >= 2)
 
     checkAnswer(
       sql(s"SELECT * FROM $tableNameAsString"),
@@ -53,7 +51,6 @@ class UpdateDataFrameSuite extends RowLevelOperationSuiteBase {
 
     spark.table(tableNameAsString)
       .update(Map("dep" -> lit("software")))
-      .execute()
 
     checkAnswer(
       sql(s"SELECT * FROM $tableNameAsString"),

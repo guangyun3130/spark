@@ -60,9 +60,11 @@ import org.apache.spark.sql.execution.datasources.LogicalRelation
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation, FileTable}
 import org.apache.spark.sql.execution.python.EvaluatePython
 import org.apache.spark.sql.execution.stat.StatFunctions
+import org.apache.spark.sql.functions.expr
 import org.apache.spark.sql.internal.{DataFrameWriterImpl, DataFrameWriterV2Impl, MergeIntoWriterImpl, SQLConf, ToScalaUDF}
 import org.apache.spark.sql.internal.ExpressionUtils.column
 import org.apache.spark.sql.internal.TypedAggUtils.withInputType
+import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.streaming.DataStreamWriter
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.SchemaUtils
@@ -182,6 +184,7 @@ private[sql] object Dataset {
  * {{{
  *   // To create Dataset[Row] using SparkSession
  *   val people = spark.read.parquet("...")
+ *   val department = spark.read.parquet("...")
  *   val department = spark.read.parquet("...")
  *
  *   people.filter("age > 30")
@@ -1655,12 +1658,12 @@ class Dataset[T] private[sql](
   }
 
   /**
-   * Update rows in a table that match a condition.
+   * Update rows in a table.
    *
    * Scala Example:
    * {{{
-   *   spark.table("source").update(Map("salary" -> lit(200)))
-   *    .where($"salary" === 100)
+   *   spark.table("source")
+   *    .update(Map("salary" -> lit(200)))
    *    .execute()
    *
    * }}}
@@ -1668,13 +1671,27 @@ class Dataset[T] private[sql](
    *     to be applied.
    * @since 4.0.0
    */
-  def update(assignments: Map[String, Column]): UpdateWriter[T] = {
-    if (isStreaming) {
-      throw new AnalysisException(
-        errorClass = "CALL_ON_STREAMING_DATASET_UNSUPPORTED",
-        messageParameters = Map("methodName" -> toSQLId("update")))
-    }
-    new UpdateWriter[T](this, assignments)
+  def update(assignments: Map[String, Column]): Unit = {
+    updateInternal(assignments)
+  }
+
+  /**
+   * Update rows in a table that match a condition.
+   *
+   * Scala Example:
+   * {{{
+   *   spark.table("source")
+   *    .update(Map("salary" -> lit(200)), $"salary" === 100)
+   *    .execute()
+   *
+   * }}}
+   * @param assignments A Map of column names to Column expressions representing the updates
+   *     to be applied.
+   * @param condition the update condition
+   * @since 4.0.0
+   */
+  def update(assignments: Map[String, Column], condition: Column): Unit = {
+    updateInternal(assignments, Some(condition))
   }
 
   /**
@@ -2296,5 +2313,20 @@ class Dataset[T] private[sql](
   // This is only used in tests, for now.
   private[sql] def toArrowBatchRdd: RDD[Array[Byte]] = {
     toArrowBatchRdd(queryExecution.executedPlan)
+  }
+
+  private def updateInternal(assignments: Map[String, Column],
+    condition: Option[Column] = None): Unit = {
+    if (isStreaming) {
+      throw new AnalysisException(
+        errorClass = "CALL_ON_STREAMING_DATASET_UNSUPPORTED",
+        messageParameters = Map("methodName" -> toSQLId("update")))
+    }
+    val update = UpdateTable(
+      logicalPlan,
+      assignments.map(x => Assignment(expr(x._1).expr, x._2.expr)).toSeq,
+      condition.map(_.expr))
+    val qe = sparkSession.sessionState.executePlan(update)
+    qe.assertCommandExecuted()
   }
 }
