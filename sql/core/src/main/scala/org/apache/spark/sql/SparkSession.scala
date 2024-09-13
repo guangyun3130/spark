@@ -658,22 +658,6 @@ class SparkSession private(
    */
   def readStream: DataStreamReader = new DataStreamReader(self)
 
-  /**
-   * Executes some code block and prints to stdout the time taken to execute the block. This is
-   * available in Scala only and is used primarily for interactive testing and debugging.
-   *
-   * @since 2.1.0
-   */
-  def time[T](f: => T): T = {
-    val start = System.nanoTime()
-    val ret = f
-    val end = System.nanoTime()
-    // scalastyle:off println
-    println(s"Time taken: ${NANOSECONDS.toMillis(end - start)} ms")
-    // scalastyle:on println
-    ret
-  }
-
   // scalastyle:off
   // Disable style checker so "implicits" object can start with lowercase i
   /**
