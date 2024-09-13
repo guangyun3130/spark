@@ -308,7 +308,6 @@ object CheckConnectJvmClientCompatibility {
       // Update Writer
       ProblemFilters.exclude[MissingMethodProblem]("org.apache.spark.sql.SparkSession.update"))
 
-
     checkMiMaCompatibility(clientJar, sqlJar, includedRules, excludeRules)
   }
 

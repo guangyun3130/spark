@@ -63,7 +63,6 @@ import org.apache.spark.sql.execution.stat.StatFunctions
 import org.apache.spark.sql.functions.expr
 import org.apache.spark.sql.internal.{DataFrameWriterImpl, DataFrameWriterV2Impl, MergeIntoWriterImpl, SQLConf, ToScalaUDF}
 import org.apache.spark.sql.internal.ExpressionUtils.column
-import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.internal.TypedAggUtils.withInputType
 import org.apache.spark.sql.streaming.DataStreamWriter
 import org.apache.spark.sql.types._
