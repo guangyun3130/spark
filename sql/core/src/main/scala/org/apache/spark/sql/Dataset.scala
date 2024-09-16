@@ -1656,13 +1656,12 @@ class Dataset[T] private[sql](
   }
 
   /**
-   * Update rows in a table.
+   * Update rows in a table. Only applies to Datasets that are direct table scans.
    *
    * Scala Example:
    * {{{
    *   spark.table("source")
    *    .update(Map("salary" -> lit(200)))
-   *    .execute()
    * }}}
    * @param assignments A Map of column names to Column expressions representing the updates
    *     to be applied.
@@ -1674,13 +1673,13 @@ class Dataset[T] private[sql](
   }
 
   /**
-   * Update rows in a table that match a condition.
+   * Update rows in a table that match a condition. Only applies to Datasets that are
+   * direct table scans.
    *
    * Scala Example:
    * {{{
    *   spark.table("source")
    *    .update(Map("salary" -> lit(200)), $"salary" === 100)
-   *    .execute()
    * }}}
    * @param assignments A Map of column names to Column expressions representing the updates
    *     to be applied.
@@ -2313,8 +2312,9 @@ class Dataset[T] private[sql](
     toArrowBatchRdd(queryExecution.executedPlan)
   }
 
-  private def updateInternal(assignments: Map[String, Column],
-    condition: Option[Column] = None): Unit = {
+  private def updateInternal(
+      assignments: Map[String, Column],
+      condition: Option[Column] = None): Unit = {
     if (isStreaming) {
       throw new AnalysisException(
         errorClass = "CALL_ON_STREAMING_DATASET_UNSUPPORTED",
