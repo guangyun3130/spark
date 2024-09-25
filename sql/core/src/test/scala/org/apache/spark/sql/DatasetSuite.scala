@@ -2802,7 +2802,7 @@ class DatasetSuite extends QueryTest
     }
   }
 
-  test("SPARK-46679 Bean class encoding with type parameter implementing Serializable") {
+  test("SPARK-49789 Bean class encoding with generic type implementing Serializable") {
     // just create encoder
     val enc = Encoders.bean(classOf[MessageWrapper[_]])
     val data = Seq("test1", "test2").map(str => {
@@ -2810,13 +2810,13 @@ class DatasetSuite extends QueryTest
       msg.setMessage(str)
       msg
     })
-    validateParamBeanDataset(Encoders.bean(classOf[MessageWrapper[String]]),
+    validateParamBeanDataset(classOf[MessageWrapper[String]],
       data, mutable.Buffer(data: _*),
       StructType(Seq(StructField("message", BinaryType, true)))
     )
   }
 
-  test("SPARK-46679 Bean class encoding with type parameter indirectly extending" +
+  test("SPARK-49789 Bean class encoding with  generic type indirectly extending" +
     " Serializable class") {
     // just create encoder
     Encoders.bean(classOf[BigDecimalMessageWrapper[_]])
@@ -2826,15 +2826,15 @@ class DatasetSuite extends QueryTest
       bean
     })
     validateParamBeanDataset(
-      Encoders.bean(classOf[BigDecimalMessageWrapper[DerivedBigDecimalExtender]]),
+      classOf[BigDecimalMessageWrapper[DerivedBigDecimalExtender]],
       data, mutable.Buffer(data: _*),
       StructType(Seq(StructField("message", BinaryType, true))))
   }
 
-  test("SPARK-46679. test bean class with  generic parameter bound of UDTType") {
+  test("SPARK-49789. test bean class with  generictype bound of UDTType") {
     // just create encoder
     UDTRegistration.register(classOf[TestUDT].getName, classOf[TestUDTType].getName)
-    val enc = Encoders.bean(classOf[UDTBean[TestUDT]])
+    val enc = Encoders.bean(classOf[UDTBean[_]])
     val baseData = Seq((1, "a"), (2, "b"))
     val data = baseData.map(tup => {
       val bean = new UDTBean[TestUDT]()
@@ -2847,17 +2847,18 @@ class DatasetSuite extends QueryTest
       bean
     })
     validateParamBeanDataset(
-      Encoders.bean(classOf[UDTBean[TestUDT]]),
+      classOf[UDTBean[TestUDT]],
       data, mutable.Buffer(expectedData: _*),
       StructType(Seq(StructField("message", new TestUDTType(), true))))
   }
 
   private def validateParamBeanDataset[T](
-                                           encoder: Encoder[T],
+                                           classToEncode: Class[T],
                                            data: Seq[T],
                                            expectedData: mutable.Buffer[T],
                                            expectedSchema: StructType): Unit = {
-    val ds = spark.createDataset(data)(encoder)
+
+    val ds = spark.createDataset(data)(Encoders.bean(classToEncode))
     val resultData = ds.collect()
     assertResult(expectedData.size)(resultData.length)
     resultData.foreach(e => {

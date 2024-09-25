@@ -208,7 +208,7 @@ class JavaTypeInferenceSuite extends SparkFunSuite {
     assert(encoder === expected)
   }
 
-  test("resolve bean encoder with generic types as getter/setter") {
+  test("SPARK-49789 resolve bean encoder with generic types as getter/setter") {
     val encoder = JavaTypeInference.encoderFor(classOf[GenericTypePropertiesBean[_, _, _, _, _]])
     val expected = JavaBeanEncoder(ClassTag(classOf[GenericTypePropertiesBean[_, _, _, _, _]]), Seq(
       // The order is different from the definition because fields are ordered by name.
