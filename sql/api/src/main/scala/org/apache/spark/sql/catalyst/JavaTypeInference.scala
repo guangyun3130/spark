@@ -284,14 +284,12 @@ object JavaTypeInference {
 
   private def getAllSuperClasses(typee: Type): Seq[Class[_]] = if (Option(typee).isDefined) {
     val queue = mutable.Queue.apply(typee)
-    val result = mutable.Buffer.empty[Class[_]]
     val typeSeeen = mutable.Set.empty[Type]
     while (queue.nonEmpty) {
       val typeToCheck = queue.dequeue()
       typeSeeen += typeToCheck
       typeToCheck match {
         case clazz: Class[_] =>
-          result += clazz
           queue ++= clazz.getInterfaces.filterNot(typeSeeen.contains)
           Option(clazz.getSuperclass).filterNot(typeSeeen.contains).foreach(queue += _)
 
@@ -299,7 +297,10 @@ object JavaTypeInference {
           queue ++= tv.getBounds.filterNot(typeSeeen.contains)
       }
     }
-    result.toSeq
+    typeSeeen.flatMap {
+      case clazz: Class[_] => Seq(clazz)
+      case _ => Seq.empty
+    }.toSeq
   } else {
     Seq.empty
   }

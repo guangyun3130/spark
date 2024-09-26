@@ -140,7 +140,6 @@ class SparkSession private[sql] (
 
       case Failure(exception) => throw exception
     }
-
   }
 
   /** @inheritdoc */
