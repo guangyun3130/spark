@@ -143,9 +143,7 @@ object JavaTypeInference {
         case None =>
           // Concrete type unknown, check if the bounds can be used to identify a
           // UDTEncoder and if exception is thrown check if the type extends Serializable
-          val concreteBound = tv.getBounds.collectFirst{case ClassExtractor(clazz) => clazz}
-
-         // collectFirst { case cls: Class[_] => cls }
+          val concreteBound = tv.getBounds.collectFirst { case ClassExtractor(clazz) => clazz }
           findBestEncoder(
             tv.getBounds.flatMap(ClassExtractor.getSuperClasses(_)).toSeq,
             seenTypeSet,
@@ -283,7 +281,6 @@ object JavaTypeInference {
         case _ => None
       }
     }
-
 
   object ClassExtractor {
     def getSuperClasses(typee: Type, firstFoundOnly: Boolean = false): Seq[Class[_]] =
