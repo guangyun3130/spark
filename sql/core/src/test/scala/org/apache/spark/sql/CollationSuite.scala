@@ -44,27 +44,57 @@ class CollationSuite extends DatasourceV2SQLBase with AdaptiveSparkPlanHelper {
   private val allFileBasedDataSources = collationPreservingSources ++  collationNonPreservingSources
 
   test("collate returns proper type") {
-    Seq("utf8_binary", "utf8_lcase", "unicode", "unicode_ci").foreach { collationName =>
+    Seq(
+      "utf8_binary",
+      "utf8_lcase",
+      "unicode",
+      "unicode_ci",
+      "unicode_ltrim_ci",
+      "utf8_lcase_trim",
+      "utf8_binary_rtrim"
+    ).foreach { collationName =>
       checkAnswer(sql(s"select 'aaa' collate $collationName"), Row("aaa"))
       val collationId = CollationFactory.collationNameToId(collationName)
-      assert(sql(s"select 'aaa' collate $collationName").schema(0).dataType
-        == StringType(collationId))
+      assert(
+        sql(s"select 'aaa' collate $collationName").schema(0).dataType
+        == StringType(collationId)
+      )
     }
   }
 
   test("collation name is case insensitive") {
-    Seq("uTf8_BiNaRy", "utf8_lcase", "uNicOde", "UNICODE_ci").foreach { collationName =>
+    Seq(
+      "uTf8_BiNaRy",
+      "utf8_lcase",
+      "uNicOde",
+      "UNICODE_ci",
+      "uNiCoDE_ltRIm_cI",
+      "UtF8_lCaSE_tRIM",
+      "utf8_biNAry_RtRiM"
+    ).foreach { collationName =>
       checkAnswer(sql(s"select 'aaa' collate $collationName"), Row("aaa"))
       val collationId = CollationFactory.collationNameToId(collationName)
-      assert(sql(s"select 'aaa' collate $collationName").schema(0).dataType
-        == StringType(collationId))
+      assert(
+        sql(s"select 'aaa' collate $collationName").schema(0).dataType
+        == StringType(collationId)
+      )
     }
   }
 
   test("collation expression returns name of collation") {
-    Seq("utf8_binary", "utf8_lcase", "unicode", "unicode_ci").foreach { collationName =>
+    Seq(
+      "utf8_binary",
+      "utf8_lcase",
+      "unicode",
+      "unicode_ci",
+      "unicode_ci_ltrim",
+      "utf8_lcase_trim",
+      "utf8_binary_rtrim"
+    ).foreach { collationName =>
       checkAnswer(
-        sql(s"select collation('aaa' collate $collationName)"), Row(collationName.toUpperCase()))
+        sql(s"select collation('aaa' collate $collationName)"),
+        Row(collationName.toUpperCase())
+      )
     }
   }
 
@@ -77,9 +107,15 @@ class CollationSuite extends DatasourceV2SQLBase with AdaptiveSparkPlanHelper {
 
   test("collate function syntax with default collation set") {
     withSQLConf(SqlApiConf.DEFAULT_COLLATION -> "UTF8_LCASE") {
-      assert(sql(s"select collate('aaa', 'utf8_lcase')").schema(0).dataType ==
-        StringType("UTF8_LCASE"))
+      assert(
+        sql(s"select collate('aaa', 'utf8_lcase')").schema(0).dataType ==
+        StringType("UTF8_LCASE")
+      )
       assert(sql(s"select collate('aaa', 'UNICODE')").schema(0).dataType == StringType("UNICODE"))
+      assert(
+        sql(s"select collate('aaa', 'UNICODE_TRIM')").schema(0).dataType ==
+        StringType("UNICODE_TRIM")
+      )
     }
   }
 
@@ -162,9 +198,14 @@ class CollationSuite extends DatasourceV2SQLBase with AdaptiveSparkPlanHelper {
       withTable(tableName) {
         sql(
           s"""
-             |CREATE TABLE $tableName
-             |(id INT, c1 STRING COLLATE UNICODE, c2 string)
-             |USING parquet
+             |CREATE TABLE $tableName (
+             |  id INT,
+             |  c1 STRING COLLATE UNICODE,
+             |  c2 STRING,
+             |  struct_col STRUCT<col1: STRING COLLATE UNICODE, col2: STRING>,
+             |  array_col ARRAY<STRING COLLATE UNICODE>,
+             |  map_col MAP<STRING COLLATE UNICODE, STRING>
+             |) USING parquet
              |CLUSTERED BY (${bucketColumns.mkString(",")})
              |INTO 4 BUCKETS""".stripMargin
         )
@@ -175,14 +216,20 @@ class CollationSuite extends DatasourceV2SQLBase with AdaptiveSparkPlanHelper {
     createTable("c2")
     createTable("id", "c2")
 
-    Seq(Seq("c1"), Seq("c1", "id"), Seq("c1", "c2")).foreach { bucketColumns =>
+    val failBucketingColumns = Seq(
+      Seq("c1"), Seq("c1", "id"), Seq("c1", "c2"),
+      Seq("struct_col"), Seq("array_col"), Seq("map_col")
+    )
+
+    failBucketingColumns.foreach { bucketColumns =>
       checkError(
         exception = intercept[AnalysisException] {
           createTable(bucketColumns: _*)
         },
         condition = "INVALID_BUCKET_COLUMN_DATA_TYPE",
-        parameters = Map("type" -> "\"STRING COLLATE UNICODE\"")
-      );
+        parameters = Map("type" -> ".*STRING COLLATE UNICODE.*"),
+        matchPVals = true
+      )
     }
   }
 
