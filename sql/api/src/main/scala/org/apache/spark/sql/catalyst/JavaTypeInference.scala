@@ -143,9 +143,11 @@ object JavaTypeInference {
         case None =>
           // Concrete type unknown, check if the bounds can be used to identify a
           // UDTEncoder and if exception is thrown check if the type extends Serializable
-          val concreteBound = tv.getBounds.collectFirst { case cls: Class[_] => cls }
+          val concreteBound = tv.getBounds.collectFirst{case ClassExtractor(clazz) => clazz}
+
+         // collectFirst { case cls: Class[_] => cls }
           findBestEncoder(
-            tv.getBounds.flatMap(getAllSuperClasses).toSeq,
+            tv.getBounds.flatMap(ClassExtractor.getSuperClasses(_)).toSeq,
             seenTypeSet,
             typeVariables,
             concreteBound)
@@ -282,27 +284,40 @@ object JavaTypeInference {
       }
     }
 
-  private def getAllSuperClasses(typee: Type): Seq[Class[_]] = if (Option(typee).isDefined) {
-    val queue = mutable.Queue.apply(typee)
-    val typeSeeen = mutable.Set.empty[Type]
-    while (queue.nonEmpty) {
-      val typeToCheck = queue.dequeue()
-      typeSeeen += typeToCheck
-      typeToCheck match {
-        case clazz: Class[_] =>
-          queue ++= clazz.getInterfaces.filterNot(typeSeeen.contains)
-          Option(clazz.getSuperclass).filterNot(typeSeeen.contains).foreach(queue += _)
 
-        case tv: TypeVariable[_] =>
-          queue ++= tv.getBounds.filterNot(typeSeeen.contains)
+  object ClassExtractor {
+    def getSuperClasses(typee: Type, firstFoundOnly: Boolean = false): Seq[Class[_]] =
+      if (Option(typee).isDefined) {
+        val queue = mutable.Queue.apply(typee)
+        val typeSeen = mutable.Set.empty[Type]
+        while (queue.nonEmpty) {
+          val typeToCheck = queue.dequeue()
+          typeSeen += typeToCheck
+          typeToCheck match {
+            case clazz: Class[_] =>
+              if (firstFoundOnly) {
+                // we have got the first concrete class/interface
+                queue.clear()
+              } else {
+                Option(clazz.getSuperclass).filterNot(typeSeen.contains).foreach(queue += _)
+                queue ++= clazz.getInterfaces.filterNot(typeSeen.contains)
+              }
+
+            case tv: TypeVariable[_] =>
+              queue ++= tv.getBounds.filterNot(typeSeen.contains)
+          }
+        }
+        typeSeen.flatMap {
+          case clazz: Class[_] => Seq(clazz)
+
+          case _ => Seq.empty
+        }.toSeq
+      } else {
+        Seq.empty
       }
-    }
-    typeSeeen.flatMap {
-      case clazz: Class[_] => Seq(clazz)
-      case _ => Seq.empty
-    }.toSeq
-  } else {
-    Seq.empty
+
+    def unapply(typee: Type): Option[Class[_]] =
+      getSuperClasses(typee, firstFoundOnly = true).headOption
   }
 
   object UseSerializationEncoder {
@@ -324,7 +339,7 @@ object JavaTypeInference {
     }
   }
 
-  private[sql] def setSparkClientFlag: Unit = this.clientConnectFlag.set(true)
+  private[sql] def setSparkClientFlag(): Unit = this.clientConnectFlag.set(true)
 
-  private[sql] def unsetSparkClientFlag: Unit = this.clientConnectFlag.set(false)
+  private[sql] def unsetSparkClientFlag(): Unit = this.clientConnectFlag.set(false)
 }

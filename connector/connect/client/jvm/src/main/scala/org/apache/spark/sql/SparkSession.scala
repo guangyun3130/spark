@@ -130,11 +130,11 @@ class SparkSession private[sql] (
 
   /** @inheritdoc */
   def createDataFrame(data: java.util.List[_], beanClass: Class[_]): DataFrame = {
-    JavaTypeInference.setSparkClientFlag
+    JavaTypeInference.setSparkClientFlag()
     val encoderTry = Try {
       JavaTypeInference.encoderFor(beanClass.asInstanceOf[Class[Any]])
     }
-    JavaTypeInference.unsetSparkClientFlag
+    JavaTypeInference.unsetSparkClientFlag()
     encoderTry match {
       case Success(encoder) => createDataset(encoder, data.iterator().asScala).toDF()
 
