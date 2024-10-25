@@ -39,11 +39,11 @@ class StateStoreColumnFamilySchemaUtils(initializeAvroSerde: Boolean) {
       val avroOptions = AvroOptions(Map.empty)
       val keyAvroType = SchemaConverters.toAvroType(keySchema)
       val keySer = new AvroSerializer(keySchema, keyAvroType, nullable = false)
-      val ser = new AvroSerializer(valSchema, avroType, nullable = false)
-      val de = new AvroDeserializer(avroType, valSchema,
+      val valueSerializer = new AvroSerializer(valSchema, avroType, nullable = false)
+      val valueDeserializer = new AvroDeserializer(avroType, valSchema,
         avroOptions.datetimeRebaseModeInRead, avroOptions.useStableIdForUnionType,
         avroOptions.stableIdPrefixForUnionType, avroOptions.recursiveFieldMaxDepth)
-      Some(AvroEncoderSpec(keySer, ser, de))
+      Some(AvroEncoderSpec(keySer, valueSerializer, valueDeserializer))
     } else {
       None
     }

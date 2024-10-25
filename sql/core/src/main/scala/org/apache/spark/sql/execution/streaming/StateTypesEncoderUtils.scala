@@ -188,9 +188,9 @@ class AvroTypesEncoder[V](
     valEncoder: Encoder[V],
     stateName: String,
     hasTtl: Boolean,
-    avroSerde: Option[AvroEncoderSpec]) extends StateTypesEncoder[V, Array[Byte]] {
+    avroEnc: Option[AvroEncoderSpec]) extends StateTypesEncoder[V, Array[Byte]] {
 
-  val out = new ByteArrayOutputStream
+  private lazy val out = new ByteArrayOutputStream
 
   /** Variables reused for value conversions between spark sql and object */
   private val keySerializer = keyEncoder.createSerializer()
@@ -198,7 +198,9 @@ class AvroTypesEncoder[V](
   private val objToRowSerializer = valExpressionEnc.createSerializer()
   private val rowToObjDeserializer = valExpressionEnc.resolveAndBind().createDeserializer()
 
+  // case class -> dataType
   private val keySchema = keyEncoder.schema
+  // dataType -> avroType
   private val keyAvroType = SchemaConverters.toAvroType(keySchema)
 
   // case class -> dataType
@@ -211,9 +213,10 @@ class AvroTypesEncoder[V](
     if (keyOption.isEmpty) {
       throw StateStoreErrors.implicitKeyNotFound(stateName)
     }
+    assert(avroEnc.isDefined)
 
     val keyRow = keySerializer.apply(keyOption.get).copy() // V -> InternalRow
-    val avroData = avroSerde.get.keySerializer.serialize(keyRow) // InternalRow -> GenericDataRecord
+    val avroData = avroEnc.get.keySerializer.serialize(keyRow) // InternalRow -> GenericDataRecord
 
     out.reset()
     val encoder = EncoderFactory.get().directBinaryEncoder(out, null)
@@ -225,9 +228,10 @@ class AvroTypesEncoder[V](
   }
 
   override def encodeValue(value: V): Array[Byte] = {
+    assert(avroEnc.isDefined)
     val objRow: InternalRow = objToRowSerializer.apply(value).copy() // V -> InternalRow
     val avroData =
-      avroSerde.get.valueSerializer.serialize(objRow) // InternalRow -> GenericDataRecord
+      avroEnc.get.valueSerializer.serialize(objRow) // InternalRow -> GenericDataRecord
     out.reset()
 
     val encoder = EncoderFactory.get().directBinaryEncoder(out, null)
@@ -240,16 +244,18 @@ class AvroTypesEncoder[V](
   }
 
   override def decodeValue(row: Array[Byte]): V = {
+    assert(avroEnc.isDefined)
     val reader = new GenericDatumReader[Any](valueAvroType)
     val decoder = DecoderFactory.get().binaryDecoder(row, 0, row.length, null)
     val genericData = reader.read(null, decoder) // bytes -> GenericDataRecord
-    val internalRow = avroSerde.get.valueDeserializer.deserialize(
+    val internalRow = avroEnc.get.valueDeserializer.deserialize(
       genericData).orNull.asInstanceOf[InternalRow] // GenericDataRecord -> InternalRow
     if (hasTtl) {
       rowToObjDeserializer.apply(internalRow.getStruct(0, valEncoder.schema.length))
     } else rowToObjDeserializer.apply(internalRow)
   }
 
+  // TODO: Implement the below methods for TTL
   override def encodeValue(value: V, expirationMs: Long): Array[Byte] = {
     throw new UnsupportedOperationException
   }

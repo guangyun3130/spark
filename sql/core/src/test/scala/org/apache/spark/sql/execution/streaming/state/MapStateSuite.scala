@@ -120,9 +120,9 @@ class MapStateSuite extends StateVariableSuiteBase {
       val mapTestState2: MapState[String, Int] =
         handle.getMapState[String, Int]("mapTestState2", Encoders.STRING, Encoders.scalaInt)
       val valueTestState: ValueState[String] =
-        handle.getValueState[String]("valueTestState", Encoders.STRING)
+        handle.getValueStateWithAvro[String]("valueTestState", Encoders.STRING, false)
       val listTestState: ListState[String] =
-        handle.getListState[String]("listTestState", Encoders.STRING)
+        handle.getListStateWithAvro[String]("listTestState", Encoders.STRING, false)
 
       ImplicitGroupingKeyTracker.setImplicitKey("test_key")
       // put initial values

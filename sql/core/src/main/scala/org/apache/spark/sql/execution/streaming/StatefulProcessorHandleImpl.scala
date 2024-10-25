@@ -258,6 +258,24 @@ class StatefulProcessorHandleImpl(
     resultState
   }
 
+  // This method is for unit-testing ListState, as the avroEnc will not be
+  // populated unless the handle is created through the TransformWithStateExec operator
+  private[sql] def getListStateWithAvro[T](
+      stateName: String,
+      valEncoder: Encoder[T],
+      useAvro: Boolean): ListState[T] = {
+    verifyStateVarOperations("get_list_state", CREATED)
+    val avroEnc = if (useAvro) {
+      new StateStoreColumnFamilySchemaUtils(true).getListStateSchema[T](
+        stateName, keyEncoder, valEncoder, hasTtl = false).avroEnc
+    } else {
+      None
+    }
+    val resultState = new ListStateImpl[T](
+      store, stateName, keyEncoder, valEncoder, avroEnc)
+    resultState
+  }
+
   /**
    * Function to create new or return existing list state variable of given type
    * with ttl. State values will not be returned past ttlDuration, and will be eventually removed
