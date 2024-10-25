@@ -29,7 +29,7 @@ import org.apache.hadoop.fs.Path
 import org.apache.spark.SparkContext
 import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.AnalysisException
+import org.apache.spark.sql.{AnalysisException, SparkSession}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.codegen.GenerateUnsafeProjection
@@ -95,6 +95,14 @@ object StatefulOperatorStateInfo {
   def enableStateStoreCheckpointIds(conf: SQLConf): Boolean = {
     conf.stateStoreCheckpointFormatVersion >= 2
   }
+}
+
+object StatefulOperatorUtils {
+  @transient final val session = SparkSession.getActiveSession.orNull
+
+  lazy val stateStoreEncoding: String =
+    session.sessionState.conf.getConf(
+      SQLConf.STREAMING_STATE_STORE_ENCODING_FORMAT)
 }
 
 /**
@@ -326,9 +334,6 @@ trait StateStoreWriter
       Array(StateStoreMetadataV1(StateStoreId.DEFAULT_STORE_NAME, 0, info.numPartitions))
     OperatorStateMetadataV1(operatorInfo, stateStoreInfo)
   }
-
-  lazy val useAvroEncoding: Boolean =
-    conf.getConf(SQLConf.STREAMING_STATE_STORE_ENCODING_FORMAT) == StateStoreEncoding.Avro.toString
 
   /** Set the operator level metrics */
   protected def setOperatorMetrics(numStateStoreInstances: Int = 1): Unit = {
