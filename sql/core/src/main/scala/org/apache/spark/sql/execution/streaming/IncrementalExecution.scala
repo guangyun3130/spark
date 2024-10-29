@@ -437,6 +437,31 @@ class IncrementalExecution(
               eventTimeWatermarkForEviction = iwEviction)
           ))
 
+        /*
+      case UpdateEventTimeColumnExec(eventTime, delay, None,
+      ProjectExec(projectList, t: TransformWithStateInPandasExec))
+        if t.stateInfo.isDefined =>
+        val stateInfo = t.stateInfo.get
+        val iwLateEvents = inputWatermarkForLateEvents(stateInfo)
+        val iwEviction = inputWatermarkForEviction(stateInfo)
+
+        UpdateEventTimeColumnExec(eventTime, delay, iwLateEvents,
+          ProjectExec(projectList, t.copy(
+            eventTimeWatermarkForLateEvents = iwLateEvents,
+            eventTimeWatermarkForEviction = iwEviction)
+          )) */
+
+      case UpdateEventTimeColumnExec(eventTime, delay, None,
+      t: TransformWithStateInPandasExec) if t.stateInfo.isDefined =>
+        val stateInfo = t.stateInfo.get
+        val iwLateEvents = inputWatermarkForLateEvents(stateInfo)
+        val iwEviction = inputWatermarkForEviction(stateInfo)
+
+        UpdateEventTimeColumnExec(eventTime, delay, iwLateEvents,
+          t.copy(
+            eventTimeWatermarkForLateEvents = iwLateEvents,
+            eventTimeWatermarkForEviction = iwEviction)
+        )
 
       case t: TransformWithStateExec if t.stateInfo.isDefined =>
         t.copy(
