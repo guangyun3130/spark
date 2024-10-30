@@ -320,7 +320,7 @@ object JavaTypeInference {
   object UseSerializationEncoder {
     def unapply(th: Throwable): Option[Class[_] => AgnosticEncoder[_]] = th match {
       case s: SparkUnsupportedOperationException
-          if s.getErrorClass == ExecutionErrors.ENCODER_NOT_FOUND_ERROR =>
+          if s.getCondition == ExecutionErrors.ENCODER_NOT_FOUND_ERROR =>
         s.getMessageParameters.asScala.get(ExecutionErrors.TYPE_NAME) match {
           case Some(clzzName) if clzzName == classOf[java.io.Serializable].getTypeName =>
             Option(Encoders.javaSerialization(_).asInstanceOf[AgnosticEncoder[_]])
