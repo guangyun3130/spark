@@ -33,7 +33,7 @@ import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreePattern._
 import org.apache.spark.sql.errors.QueryExecutionErrors
-import org.apache.spark.sql.execution.{LocalLimitExec, QueryExecution, SerializeFromObjectExec, SparkPlan, SparkPlanner, UnaryExecNode}
+import org.apache.spark.sql.execution.{LocalLimitExec, ProjectExec, QueryExecution, SerializeFromObjectExec, SparkPlan, SparkPlanner, UnaryExecNode}
 import org.apache.spark.sql.execution.aggregate.{HashAggregateExec, MergingSessionsExec, ObjectHashAggregateExec, SortAggregateExec, UpdatingSessionsExec}
 import org.apache.spark.sql.execution.datasources.v2.state.metadata.StateMetadataPartitionReader
 import org.apache.spark.sql.execution.exchange.ShuffleExchangeLike
@@ -437,10 +437,10 @@ class IncrementalExecution(
               eventTimeWatermarkForEviction = iwEviction)
           ))
 
-        /*
       case UpdateEventTimeColumnExec(eventTime, delay, None,
       ProjectExec(projectList, t: TransformWithStateInPandasExec))
         if t.stateInfo.isDefined =>
+
         val stateInfo = t.stateInfo.get
         val iwLateEvents = inputWatermarkForLateEvents(stateInfo)
         val iwEviction = inputWatermarkForEviction(stateInfo)
@@ -449,19 +449,7 @@ class IncrementalExecution(
           ProjectExec(projectList, t.copy(
             eventTimeWatermarkForLateEvents = iwLateEvents,
             eventTimeWatermarkForEviction = iwEviction)
-          )) */
-
-      case UpdateEventTimeColumnExec(eventTime, delay, None,
-      t: TransformWithStateInPandasExec) if t.stateInfo.isDefined =>
-        val stateInfo = t.stateInfo.get
-        val iwLateEvents = inputWatermarkForLateEvents(stateInfo)
-        val iwEviction = inputWatermarkForEviction(stateInfo)
-
-        UpdateEventTimeColumnExec(eventTime, delay, iwLateEvents,
-          t.copy(
-            eventTimeWatermarkForLateEvents = iwLateEvents,
-            eventTimeWatermarkForEviction = iwEviction)
-        )
+          ))
 
       case t: TransformWithStateExec if t.stateInfo.isDefined =>
         t.copy(

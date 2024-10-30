@@ -85,6 +85,7 @@ case class TransformWithStateExec(
 
   override def shouldRunAnotherBatch(newInputWatermark: Long): Boolean = {
     if (timeMode == ProcessingTime) {
+      println(s"inside should run another batch, proc")
       // TODO: check if we can return true only if actual timers are registered, or there is
       // expired state
       true

@@ -364,40 +364,6 @@ class TransformWithStateInPandasTestsMixin:
         finally:
             input_dir.cleanup()
 
-
-class SimpleStatefulProcessor(StatefulProcessor):
-    dict = {0: {"0": 1, "1": 2}, 1: {"0": 4, "1": 3}}
-    batch_id = 0
-
-    def init(self, handle: StatefulProcessorHandle) -> None:
-        state_schema = StructType([StructField("value", IntegerType(), True)])
-        self.num_violations_state = handle.getValueState("numViolations", state_schema)
-
-    def handleInputRows(self, key, rows) -> Iterator[pd.DataFrame]:
-        new_violations = 0
-        count = 0
-        key_str = key[0]
-        exists = self.num_violations_state.exists()
-        if exists:
-            existing_violations_row = self.num_violations_state.get()
-            existing_violations = existing_violations_row[0]
-            assert existing_violations == self.dict[0][key_str]
-            self.batch_id = 1
-        else:
-            existing_violations = 0
-        for pdf in rows:
-            pdf_count = pdf.count()
-            count += pdf_count.get("temperature")
-            violations_pdf = pdf.loc[pdf["temperature"] > 100]
-            new_violations += violations_pdf.count().get("temperature")
-        updated_violations = new_violations + existing_violations
-        assert updated_violations == self.dict[self.batch_id][key_str]
-        self.num_violations_state.update((updated_violations,))
-        yield pd.DataFrame({"id": key, "countAsString": str(count)})
-
-    def close(self) -> None:
-        pass
-
     def _test_transform_with_state_in_pandas_chaining_ops(
             self, stateful_processor, check_results, timeMode="None"
     ):
@@ -469,7 +435,42 @@ class SimpleStatefulProcessor(StatefulProcessor):
                 Row(count=1),
             }
 
-        self._test_transform_with_state_in_pandas_chaining_ops(StatefulProcessorChainingOps(), check_results)
+        self._test_transform_with_state_in_pandas_chaining_ops(
+            StatefulProcessorChainingOps(), check_results, "eventTime")
+
+
+class SimpleStatefulProcessor(StatefulProcessor):
+    dict = {0: {"0": 1, "1": 2}, 1: {"0": 4, "1": 3}}
+    batch_id = 0
+
+    def init(self, handle: StatefulProcessorHandle) -> None:
+        state_schema = StructType([StructField("value", IntegerType(), True)])
+        self.num_violations_state = handle.getValueState("numViolations", state_schema)
+
+    def handleInputRows(self, key, rows) -> Iterator[pd.DataFrame]:
+        new_violations = 0
+        count = 0
+        key_str = key[0]
+        exists = self.num_violations_state.exists()
+        if exists:
+            existing_violations_row = self.num_violations_state.get()
+            existing_violations = existing_violations_row[0]
+            assert existing_violations == self.dict[0][key_str]
+            self.batch_id = 1
+        else:
+            existing_violations = 0
+        for pdf in rows:
+            pdf_count = pdf.count()
+            count += pdf_count.get("temperature")
+            violations_pdf = pdf.loc[pdf["temperature"] > 100]
+            new_violations += violations_pdf.count().get("temperature")
+        updated_violations = new_violations + existing_violations
+        assert updated_violations == self.dict[self.batch_id][key_str]
+        self.num_violations_state.update((updated_violations,))
+        yield pd.DataFrame({"id": key, "countAsString": str(count)})
+
+    def close(self) -> None:
+        pass
 
 
 class StatefulProcessorChainingOps(StatefulProcessor):

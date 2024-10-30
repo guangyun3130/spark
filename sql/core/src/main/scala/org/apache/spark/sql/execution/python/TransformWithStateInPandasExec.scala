@@ -107,19 +107,16 @@ case class TransformWithStateInPandasExec(
     List.empty
   }
 
-  /*
   override def shouldRunAnotherBatch(newInputWatermark: Long): Boolean = {
     if (timeMode == ProcessingTime) {
-      // TODO: check if we can return true only if actual timers are registered, or there is
-      // expired state
-      true
+      false
     } else if (outputMode == OutputMode.Append || outputMode == OutputMode.Update) {
       eventTimeWatermarkForEviction.isDefined &&
         newInputWatermark > eventTimeWatermarkForEviction.get
     } else {
       false
     }
-  } */
+  }
 
   /**
    * Controls watermark propagation to downstream modes. If timeMode is
