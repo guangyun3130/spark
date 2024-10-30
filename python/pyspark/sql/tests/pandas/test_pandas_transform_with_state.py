@@ -391,18 +391,21 @@ class TransformWithStateInPandasTestsMixin:
                 fw.write("a, 20\n")
 
         def prepare_batch2(input_path):
+            with open(input_path + "/text-test4.txt", "w") as fw:
+                fw.write("a, 3\n")
+
+        def prepare_batch3(input_path):
             with open(input_path + "/text-test1.txt", "w") as fw:
                 fw.write("a, 4\n")
 
-        def prepare_batch3(input_path):
+        def prepare_batch4(input_path):
             with open(input_path + "/text-test2.txt", "w") as fw:
-                fw.write("a, 11\n")
-                fw.write("a, 13\n")
-                fw.write("a, 15\n")
+                fw.write("a, 20\n")
 
         prepare_batch1(input_path)
         prepare_batch2(input_path)
         prepare_batch3(input_path)
+        prepare_batch4(input_path)
 
         df = self._build_test_df(input_path)
         df = df.select("id",
@@ -445,9 +448,22 @@ class TransformWithStateInPandasTestsMixin:
 
     def test_transform_with_state_in_pandas_chaining_ops(self):
         def check_results(batch_df, batch_id):
-            assert set(batch_df.sort("outputTimestamp").select("count").collect()) == {
-                Row(count=1),
-            }
+            import datetime
+            if batch_id == 0:
+                assert set(batch_df.sort("outputTimestamp").collect()) == {
+                    Row(outputTimestamp=datetime.datetime(1970, 1, 1, 0, 0, 20), count=1),
+                }
+            elif batch_id == 1:
+                assert set(batch_df.sort("outputTimestamp").collect()) == {
+                    Row(outputTimestamp=datetime.datetime(1970, 1, 1, 0, 0, 3), count=1),
+                }
+            elif batch_id == 2:
+                # as the late event watermark is 10, eventTime=3 is dropped
+                assert batch_df.isEmpty()
+            else:
+                assert set(batch_df.sort("outputTimestamp").collect()) == {
+                    Row(outputTimestamp=datetime.datetime(1970, 1, 1, 0, 0, 20), count=2),
+                }
 
         self._test_transform_with_state_in_pandas_chaining_ops(
             StatefulProcessorChainingOps(), check_results, "eventTime")
@@ -494,7 +510,6 @@ class StatefulProcessorChainingOps(StatefulProcessor):
     def handleInputRows(self, key, rows) -> Iterator[pd.DataFrame]:
         for pdf in rows:
             l = pdf['eventTime'].tolist()
-
         yield pd.DataFrame({"id": key, "outputTimestamp": l[0]})
 
     def close(self) -> None:

@@ -162,7 +162,15 @@ case class TransformWithStateInPandasExec(
         val currentTimeNs = System.nanoTime
         val updatesStartTimeNs = currentTimeNs
 
-        val data = groupAndProject(dataIterator, groupingAttributes, child.output, dedupAttributes)
+        // If timeout is based on event time, then filter late data based on watermark
+        val filteredIter = watermarkPredicateForDataForLateEvents match {
+          case Some(predicate) =>
+            applyRemovingRowsOlderThanWatermark(dataIterator, predicate)
+          case _ =>
+            dataIterator
+        }
+
+        val data = groupAndProject(filteredIter, groupingAttributes, child.output, dedupAttributes)
 
         val processorHandle = new StatefulProcessorHandleImpl(store, getStateInfo.queryRunId,
           groupingKeyExprEncoder, timeMode, isStreaming = true, batchTimestampMs, metrics)

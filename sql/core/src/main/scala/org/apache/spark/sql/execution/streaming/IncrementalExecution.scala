@@ -437,6 +437,12 @@ class IncrementalExecution(
               eventTimeWatermarkForEviction = iwEviction)
           ))
 
+      // UpdateEventTimeColumnExec is used to tag the eventTime column, and validate
+      // emitted rows adhere to watermark in the output of transformWithStateInp.
+      // Hence, this node shares the same watermark value as TransformWithStateInPandasExec.
+      // This is the same as above in TransformWithStateExec.
+      // The only difference is TransformWithStateInPandasExec is analysed slightly different
+      // in the physical plan with `Project` and it is not `SerializeFromObjectExec`.
       case UpdateEventTimeColumnExec(eventTime, delay, None,
       ProjectExec(projectList, t: TransformWithStateInPandasExec))
         if t.stateInfo.isDefined =>
