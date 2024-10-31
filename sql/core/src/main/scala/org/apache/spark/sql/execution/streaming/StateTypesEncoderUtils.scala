@@ -65,6 +65,14 @@ object TransformWithStateKeyValueRowSchemaUtils {
   }
 }
 
+/**
+ * A trait that defines encoding and decoding operations for state types in Structured Streaming.
+ * This encoder handles the conversion between user-defined types and storage types for both
+ * state keys and values, with optional TTL (Time-To-Live) support.
+ *
+ * @tparam V The user-defined value type to be stored in state
+ * @tparam S The storage type used to represent the state (e.g., UnsafeRow or Array[Byte])
+ */
 trait StateTypesEncoder[V, S] {
   def encodeGroupingKey(): S
   def encodeValue(value: V): S
@@ -78,7 +86,7 @@ trait StateTypesEncoder[V, S] {
  * Helper class providing APIs to encode the grouping key, and user provided values
  * to Spark [[UnsafeRow]].
  *
- * CAUTION: StateTypesEncoder class instance is *not* thread-safe.
+ * CAUTION: UnsafeRowTypesEncoder class instance is *not* thread-safe.
  * This class reuses the keyProjection and valueProjection for encoding grouping
  * key and state value respectively. As UnsafeProjection is not thread safe, this
  * class is also not thread safe.
@@ -171,16 +179,13 @@ object UnsafeRowTypesEncoder {
 
 /**
  * Helper class providing APIs to encode the grouping key, and user provided values
- * to Spark [[UnsafeRow]].
- *
- * CAUTION: StateTypesEncoder class instance is *not* thread-safe.
- * This class reuses the keyProjection and valueProjection for encoding grouping
- * key and state value respectively. As UnsafeProjection is not thread safe, this
- * class is also not thread safe.
+ * to an Avro Byte Array.
  *
  * @param keyEncoder - SQL encoder for the grouping key, key type is implicit
  * @param valEncoder - SQL encoder for value of type `S`
  * @param stateName - name of logical state partition
+ * @param hasTtl - whether or not TTL is enabled for this state variable
+ * @param avroEnc = Avro encoder that should be specified to encode keys and values to byte arrays
  * @tparam V - value type
  */
 class AvroTypesEncoder[V](

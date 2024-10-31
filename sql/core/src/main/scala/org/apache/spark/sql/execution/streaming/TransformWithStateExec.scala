@@ -732,7 +732,8 @@ object TransformWithStateExec {
       queryRunId = UUID.randomUUID(),
       operatorId = 0,
       storeVersion = 0,
-      numPartitions = shufflePartitions
+      numPartitions = shufflePartitions,
+      stateStoreCkptIds = None
     )
 
     new TransformWithStateExec(

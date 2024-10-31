@@ -32,6 +32,7 @@ import org.apache.spark.sql.types.StructType
  * @param stateName - name of logical state partition
  * @param keyExprEnc - Spark SQL encoder for key
  * @param valEncoder - Spark SQL encoder for value
+ * @param avroEnc: Optional Avro encoder and decoder to convert between S and Avro row
  * @param metrics - metrics to be updated as part of stateful processing
  * @tparam K - type of key for map state variable
  * @tparam V - type of value for map state variable

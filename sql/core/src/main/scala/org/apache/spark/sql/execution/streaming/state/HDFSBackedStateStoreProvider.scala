@@ -102,7 +102,6 @@ private[sql] class HDFSBackedStateStoreProvider extends StateStoreProvider with 
       throw StateStoreErrors.unsupportedOperationException("multipleValuesPerKey", "HDFSStateStore")
     }
 
-
     override def get(key: Array[Byte], colFamilyName: String): Array[Byte] = {
       throw StateStoreErrors.unsupportedOperationException("Byte array method", "HDFSStateStore")
     }

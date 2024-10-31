@@ -2211,7 +2211,7 @@ object SQLConf {
       .version("4.0.0")
       .stringConf
       .checkValue(v => Set("UnsafeRow", "Avro").contains(v),
-        "Valid versions are 'UnsafeRow' and 'Avro'")
+        "Valid values are 'UnsafeRow' and 'Avro'")
       .createWithDefault("UnsafeRow")
 
   // The feature is still in development, so it is still internal.
