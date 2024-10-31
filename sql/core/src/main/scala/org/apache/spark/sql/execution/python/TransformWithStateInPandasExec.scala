@@ -159,6 +159,8 @@ case class TransformWithStateInPandasExec(
       case (store: StateStore, dataIterator: Iterator[InternalRow]) =>
         val allUpdatesTimeMs = longMetric("allUpdatesTimeMs")
         val commitTimeMs = longMetric("commitTimeMs")
+        // TODO(SPARK-49603) set the metrics in the lazily initialized iterator
+        val timeoutLatencyMs = longMetric("allRemovalsTimeMs")
         val currentTimeNs = System.nanoTime
         val updatesStartTimeNs = currentTimeNs
 
@@ -184,7 +186,9 @@ case class TransformWithStateInPandasExec(
           pythonRunnerConf,
           pythonMetrics,
           jobArtifactUUID,
-          groupingKeySchema
+          groupingKeySchema,
+          batchTimestampMs,
+          eventTimeWatermarkForEviction
         )
 
         val outputIterator = executePython(data, output, runner)
