@@ -58,7 +58,7 @@ class ListStateImpl[S](
     valEncoder.schema,
     NoPrefixKeyStateEncoderSpec(keyExprEnc.schema),
     useMultipleValuesPerKey = true,
-    avroEncoderSpec = None)
+    avroEncoderSpec = avroEnc)
 
   /** Whether state exists or not. */
    override def exists(): Boolean = {

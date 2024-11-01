@@ -126,7 +126,7 @@ object RocksDBStateEncoder {
       useMultipleValuesPerKey: Boolean,
       avroEnc: Option[AvroEncoderSpec] = None): RocksDBValueStateEncoder = {
     if (useMultipleValuesPerKey) {
-      new MultiValuedStateEncoder(valueSchema)
+      new MultiValuedStateEncoder(valueSchema, avroEnc)
     } else {
       new SingleValueStateEncoder(valueSchema, avroEnc)
     }
@@ -752,16 +752,33 @@ class NoPrefixKeyStateEncoder(
  * merged in RocksDB using merge operation, and all merged values can be read using decodeValues
  * operation.
  */
-class MultiValuedStateEncoder(valueSchema: StructType)
+class MultiValuedStateEncoder(
+    valueSchema: StructType,
+    avroEnc: Option[AvroEncoderSpec] = None)
   extends RocksDBValueStateEncoder with Logging {
 
   import RocksDBStateEncoder._
 
   // Reusable objects
+  private val out = new ByteArrayOutputStream
   private val valueRow = new UnsafeRow(valueSchema.size)
+  private val valueAvroType = SchemaConverters.toAvroType(valueSchema)
+  private val valueProj = UnsafeProjection.create(valueSchema)
 
   override def encodeValue(row: UnsafeRow): Array[Byte] = {
-    val bytes = encodeUnsafeRow(row)
+    val bytes = if (avroEnc.isDefined) {
+      val avroData =
+        avroEnc.get.valueSerializer.serialize(row) // InternalRow -> GenericDataRecord
+      out.reset()
+      val encoder = EncoderFactory.get().directBinaryEncoder(out, null)
+      val writer = new GenericDatumWriter[Any](
+        valueAvroType) // Defining Avro writer for this struct type
+      writer.write(avroData, encoder) // GenericDataRecord -> bytes
+      encoder.flush()
+      out.toByteArray
+    } else {
+      encodeUnsafeRow(row)
+    }
     val numBytes = bytes.length
 
     val encodedBytes = new Array[Byte](java.lang.Integer.BYTES + bytes.length)
@@ -780,7 +797,17 @@ class MultiValuedStateEncoder(valueSchema: StructType)
       val encodedValue = new Array[Byte](numBytes)
       Platform.copyMemory(valueBytes, java.lang.Integer.BYTES + Platform.BYTE_ARRAY_OFFSET,
         encodedValue, Platform.BYTE_ARRAY_OFFSET, numBytes)
-      decodeToUnsafeRow(encodedValue, valueRow)
+      if (avroEnc.isDefined) {
+        val reader = new GenericDatumReader[Any](valueAvroType)
+        val decoder = DecoderFactory.get().binaryDecoder(encodedValue,
+          0, encodedValue.length, null)
+        val genericData = reader.read(null, decoder) // bytes -> GenericDataRecord
+        val internalRow = avroEnc.get.valueDeserializer.deserialize(
+          genericData).orNull.asInstanceOf[InternalRow]
+        valueProj.apply(internalRow)
+      } else {
+        decodeToUnsafeRow(encodedValue, valueRow)
+      }
     }
   }
 
@@ -806,7 +833,17 @@ class MultiValuedStateEncoder(valueSchema: StructType)
 
           pos += numBytes
           pos += 1 // eat the delimiter character
-          decodeToUnsafeRow(encodedValue, valueRow)
+          if (avroEnc.isDefined) {
+            val reader = new GenericDatumReader[Any](valueAvroType)
+            val decoder = DecoderFactory.get().binaryDecoder(encodedValue,
+              0, encodedValue.length, null)
+            val genericData = reader.read(null, decoder) // bytes -> GenericDataRecord
+            val internalRow = avroEnc.get.valueDeserializer.deserialize(
+              genericData).orNull.asInstanceOf[InternalRow]
+            valueProj.apply(internalRow)
+          } else {
+            decodeToUnsafeRow(encodedValue, valueRow)
+          }
         }
       }
     }
