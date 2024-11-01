@@ -17,18 +17,12 @@
 
 package org.apache.spark.sql.execution.streaming
 
-import java.io.ByteArrayOutputStream
-
-import org.apache.avro.generic.{GenericDatumReader, GenericDatumWriter}
-import org.apache.avro.io.{DecoderFactory, EncoderFactory}
-
 import org.apache.spark.sql.Encoder
-import org.apache.spark.sql.avro.SchemaConverters
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.encoders.{encoderFor, ExpressionEncoder}
 import org.apache.spark.sql.catalyst.expressions.{UnsafeProjection, UnsafeRow}
 import org.apache.spark.sql.execution.streaming.TransformWithStateKeyValueRowSchemaUtils._
-import org.apache.spark.sql.execution.streaming.state.{AvroEncoderSpec, StateStoreErrors}
+import org.apache.spark.sql.execution.streaming.state.StateStoreErrors
 import org.apache.spark.sql.types._
 
 /**
@@ -66,27 +60,10 @@ object TransformWithStateKeyValueRowSchemaUtils {
 }
 
 /**
- * A trait that defines encoding and decoding operations for state types in Structured Streaming.
- * This encoder handles the conversion between user-defined types and storage types for both
- * state keys and values, with optional TTL (Time-To-Live) support.
- *
- * @tparam V The user-defined value type to be stored in state
- * @tparam S The storage type used to represent the state (e.g., UnsafeRow or Array[Byte])
- */
-trait StateTypesEncoder[V, S] {
-  def encodeGroupingKey(): S
-  def encodeValue(value: V): S
-  def decodeValue(row: S): V
-  def encodeValue(value: V, expirationMs: Long): S
-  def decodeTtlExpirationMs(row: S): Option[Long]
-  def isExpired(row: S, batchTimestampMs: Long): Boolean
-}
-
-/**
  * Helper class providing APIs to encode the grouping key, and user provided values
  * to Spark [[UnsafeRow]].
  *
- * CAUTION: UnsafeRowTypesEncoder class instance is *not* thread-safe.
+ * CAUTION: StateTypesEncoder class instance is *not* thread-safe.
  * This class reuses the keyProjection and valueProjection for encoding grouping
  * key and state value respectively. As UnsafeProjection is not thread safe, this
  * class is also not thread safe.
@@ -96,11 +73,11 @@ trait StateTypesEncoder[V, S] {
  * @param stateName - name of logical state partition
  * @tparam V - value type
  */
-class UnsafeRowTypesEncoder[V](
+class StateTypesEncoder[V](
     keyEncoder: ExpressionEncoder[Any],
     valEncoder: Encoder[V],
     stateName: String,
-    hasTtl: Boolean) extends StateTypesEncoder[V, UnsafeRow] {
+    hasTtl: Boolean) {
 
   /** Variables reused for value conversions between spark sql and object */
   private val keySerializer = keyEncoder.createSerializer()
@@ -166,121 +143,23 @@ class UnsafeRowTypesEncoder[V](
   }
 }
 
-
-object UnsafeRowTypesEncoder {
+object StateTypesEncoder {
   def apply[V](
       keyEncoder: ExpressionEncoder[Any],
       valEncoder: Encoder[V],
       stateName: String,
-      hasTtl: Boolean = false): UnsafeRowTypesEncoder[V] = {
-    new UnsafeRowTypesEncoder[V](keyEncoder, valEncoder, stateName, hasTtl)
+      hasTtl: Boolean = false): StateTypesEncoder[V] = {
+    new StateTypesEncoder[V](keyEncoder, valEncoder, stateName, hasTtl)
   }
 }
 
-/**
- * Helper class providing APIs to encode the grouping key, and user provided values
- * to an Avro Byte Array.
- *
- * @param keyEncoder - SQL encoder for the grouping key, key type is implicit
- * @param valEncoder - SQL encoder for value of type `S`
- * @param stateName - name of logical state partition
- * @param hasTtl - whether or not TTL is enabled for this state variable
- * @param avroEnc = Avro encoder that should be specified to encode keys and values to byte arrays
- * @tparam V - value type
- */
-class AvroTypesEncoder[V](
-    keyEncoder: ExpressionEncoder[Any],
-    valEncoder: Encoder[V],
-    stateName: String,
-    hasTtl: Boolean,
-    avroEnc: Option[AvroEncoderSpec]) extends StateTypesEncoder[V, Array[Byte]] {
-
-  private lazy val out = new ByteArrayOutputStream
-
-  /** Variables reused for value conversions between spark sql and object */
-  private val keySerializer = keyEncoder.createSerializer()
-  private val valExpressionEnc = encoderFor(valEncoder)
-  private val objToRowSerializer = valExpressionEnc.createSerializer()
-  private val rowToObjDeserializer = valExpressionEnc.resolveAndBind().createDeserializer()
-
-  // case class -> dataType
-  private val keySchema = keyEncoder.schema
-  // dataType -> avroType
-  private val keyAvroType = SchemaConverters.toAvroType(keySchema)
-
-  // case class -> dataType
-  private val valSchema: StructType = valEncoder.schema
-  // dataType -> avroType
-  private val valueAvroType = SchemaConverters.toAvroType(valSchema)
-
-  override def encodeGroupingKey(): Array[Byte] = {
-    val keyOption = ImplicitGroupingKeyTracker.getImplicitKeyOption
-    if (keyOption.isEmpty) {
-      throw StateStoreErrors.implicitKeyNotFound(stateName)
-    }
-    assert(avroEnc.isDefined)
-
-    val keyRow = keySerializer.apply(keyOption.get).copy() // V -> InternalRow
-    val avroData = avroEnc.get.keySerializer.serialize(keyRow) // InternalRow -> GenericDataRecord
-
-    out.reset()
-    val encoder = EncoderFactory.get().directBinaryEncoder(out, null)
-    val writer = new GenericDatumWriter[Any](keyAvroType)
-
-    writer.write(avroData, encoder)
-    encoder.flush()
-    out.toByteArray
-  }
-
-  override def encodeValue(value: V): Array[Byte] = {
-    assert(avroEnc.isDefined)
-    val objRow: InternalRow = objToRowSerializer.apply(value).copy() // V -> InternalRow
-    val avroData =
-      avroEnc.get.valueSerializer.serialize(objRow) // InternalRow -> GenericDataRecord
-    out.reset()
-
-    val encoder = EncoderFactory.get().directBinaryEncoder(out, null)
-    val writer = new GenericDatumWriter[Any](
-      valueAvroType) // Defining Avro writer for this struct type
-
-    writer.write(avroData, encoder) // GenericDataRecord -> bytes
-    encoder.flush()
-    out.toByteArray
-  }
-
-  override def decodeValue(row: Array[Byte]): V = {
-    assert(avroEnc.isDefined)
-    val reader = new GenericDatumReader[Any](valueAvroType)
-    val decoder = DecoderFactory.get().binaryDecoder(row, 0, row.length, null)
-    val genericData = reader.read(null, decoder) // bytes -> GenericDataRecord
-    val internalRow = avroEnc.get.valueDeserializer.deserialize(
-      genericData).orNull.asInstanceOf[InternalRow] // GenericDataRecord -> InternalRow
-    if (hasTtl) {
-      rowToObjDeserializer.apply(internalRow.getStruct(0, valEncoder.schema.length))
-    } else rowToObjDeserializer.apply(internalRow)
-  }
-
-  // TODO: Implement the below methods for TTL
-  override def encodeValue(value: V, expirationMs: Long): Array[Byte] = {
-    throw new UnsupportedOperationException
-  }
-
-  override def decodeTtlExpirationMs(row: Array[Byte]): Option[Long] = {
-    throw new UnsupportedOperationException
-  }
-
-  override def isExpired(row: Array[Byte], batchTimestampMs: Long): Boolean = {
-    throw new UnsupportedOperationException
-  }
-}
-
-class CompositeKeyUnsafeRowEncoder[K, V](
+class CompositeKeyStateEncoder[K, V](
     keyEncoder: ExpressionEncoder[Any],
     userKeyEnc: Encoder[K],
     valEncoder: Encoder[V],
     stateName: String,
     hasTtl: Boolean = false)
-  extends UnsafeRowTypesEncoder[V](keyEncoder, valEncoder, stateName, hasTtl) {
+  extends StateTypesEncoder[V](keyEncoder, valEncoder, stateName, hasTtl) {
   import org.apache.spark.sql.execution.streaming.TransformWithStateKeyValueRowSchemaUtils._
 
   /** Encoders */

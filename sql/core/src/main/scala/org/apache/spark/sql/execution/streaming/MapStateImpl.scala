@@ -21,7 +21,7 @@ import org.apache.spark.sql.Encoder
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.execution.streaming.TransformWithStateKeyValueRowSchemaUtils._
-import org.apache.spark.sql.execution.streaming.state.{AvroEncoderSpec, PrefixKeyScanStateEncoderSpec, StateStore, StateStoreErrors, UnsafeRowPair}
+import org.apache.spark.sql.execution.streaming.state.{PrefixKeyScanStateEncoderSpec, StateStore, StateStoreErrors, UnsafeRowPair}
 import org.apache.spark.sql.streaming.MapState
 import org.apache.spark.sql.types.StructType
 
@@ -32,7 +32,6 @@ import org.apache.spark.sql.types.StructType
  * @param stateName - name of logical state partition
  * @param keyExprEnc - Spark SQL encoder for key
  * @param valEncoder - Spark SQL encoder for value
- * @param avroEnc: Optional Avro encoder and decoder to convert between S and Avro row
  * @param metrics - metrics to be updated as part of stateful processing
  * @tparam K - type of key for map state variable
  * @tparam V - type of value for map state variable
@@ -43,7 +42,6 @@ class MapStateImpl[K, V](
     keyExprEnc: ExpressionEncoder[Any],
     userKeyEnc: Encoder[K],
     valEncoder: Encoder[V],
-    avroEnc: Option[AvroEncoderSpec],
     metrics: Map[String, SQLMetric] = Map.empty) extends MapState[K, V] with Logging {
 
   // Pack grouping key and user key together as a prefixed composite key
@@ -51,8 +49,8 @@ class MapStateImpl[K, V](
     getCompositeKeySchema(keyExprEnc.schema, userKeyEnc.schema)
   }
   private val schemaForValueRow: StructType = valEncoder.schema
-  private val stateTypesEncoder = new CompositeKeyUnsafeRowEncoder(
-    keyExprEnc, userKeyEnc, valEncoder, stateName, hasTtl = false)
+  private val stateTypesEncoder = new CompositeKeyStateEncoder(
+    keyExprEnc, userKeyEnc, valEncoder, stateName)
 
   store.createColFamilyIfAbsent(stateName, schemaForCompositeKeyRow, schemaForValueRow,
     PrefixKeyScanStateEncoderSpec(schemaForCompositeKeyRow, 1))

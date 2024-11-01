@@ -29,7 +29,7 @@ import org.apache.hadoop.fs.Path
 import org.apache.spark.SparkContext
 import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{AnalysisException, SparkSession}
+import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.codegen.GenerateUnsafeProjection
@@ -97,14 +97,6 @@ object StatefulOperatorStateInfo {
   }
 }
 
-object StatefulOperatorUtils {
-  @transient final val session = SparkSession.getActiveSession.orNull
-
-  lazy val stateStoreEncoding: String =
-    session.sessionState.conf.getConf(
-      SQLConf.STREAMING_STATE_STORE_ENCODING_FORMAT)
-}
-
 /**
  * An operator that reads or writes state from the [[StateStore]].
  * The [[StatefulOperatorStateInfo]] should be filled in by `prepareForExecution` in
@@ -118,6 +110,10 @@ trait StatefulOperator extends SparkPlan {
       throw new IllegalStateException("State location not present for execution")
     }
   }
+
+  lazy val stateStoreEncoding: String =
+    session.sessionState.conf.getConf(
+      SQLConf.STREAMING_STATE_STORE_ENCODING_FORMAT)
 
   def metadataFilePath(): Path = {
     val stateCheckpointPath =

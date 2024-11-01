@@ -32,7 +32,6 @@ import org.apache.spark.sql.types.StructType
  * @param stateName - name of logical state partition
  * @param keyExprEnc - Spark SQL encoder for key
  * @param valEncoder - Spark SQL encoder for value
- * @param avroEnc: Optional Avro encoder and decoder to convert between S and Avro row
  * @param metrics - metrics to be updated as part of stateful processing
  * @tparam S - data type of object that will be stored in the list
  */
@@ -41,8 +40,8 @@ class ListStateImpl[S](
      stateName: String,
      keyExprEnc: ExpressionEncoder[Any],
      valEncoder: Encoder[S],
-     avroEnc: Option[AvroEncoderSpec],
-     metrics: Map[String, SQLMetric] = Map.empty)
+     metrics: Map[String, SQLMetric] = Map.empty,
+     avroEnc: Option[AvroEncoderSpec] = None)
   extends ListStateMetricsImpl
   with ListState[S]
   with Logging {
@@ -51,187 +50,106 @@ class ListStateImpl[S](
   override def baseStateName: String = stateName
   override def exprEncSchema: StructType = keyExprEnc.schema
 
-  // If we are using Avro, the avroSerde parameter must be populated
-  // else, we will default to using UnsafeRow.
-  private val usingAvro: Boolean = avroEnc.isDefined
-  private val avroTypesEncoder = new AvroTypesEncoder[S](
-    keyExprEnc, valEncoder, stateName, hasTtl = false, avroEnc)
-  private val unsafeRowTypesEncoder = new UnsafeRowTypesEncoder[S](
-    keyExprEnc, valEncoder, stateName, hasTtl = false)
+  private val stateTypesEncoder = StateTypesEncoder(keyExprEnc, valEncoder, stateName)
 
-  store.createColFamilyIfAbsent(stateName, keyExprEnc.schema, valEncoder.schema,
-    NoPrefixKeyStateEncoderSpec(keyExprEnc.schema), useMultipleValuesPerKey = true)
+  store.createColFamilyIfAbsent(
+    stateName,
+    keyExprEnc.schema,
+    valEncoder.schema,
+    NoPrefixKeyStateEncoderSpec(keyExprEnc.schema),
+    useMultipleValuesPerKey = true,
+    avroEncoderSpec = None)
 
   /** Whether state exists or not. */
-  override def exists(): Boolean = {
-    if (usingAvro) {
-      val encodedKey: Array[Byte] = avroTypesEncoder.encodeGroupingKey()
-      store.get(encodedKey, stateName) != null
-    } else {
-      val encodedKey = unsafeRowTypesEncoder.encodeGroupingKey()
-      store.get(encodedKey, stateName) != null
-    }
-  }
+   override def exists(): Boolean = {
+     val encodedGroupingKey = stateTypesEncoder.encodeGroupingKey()
+     val stateValue = store.get(encodedGroupingKey, stateName)
+     stateValue != null
+   }
 
-  /**
-   * Get the state value if it exists. If the state does not exist in state store, an
-   * empty iterator is returned.
-   */
-  override def get(): Iterator[S] = {
-    if (usingAvro) {
-      getAvro()
-    } else {
-      getUnsafeRow()
-    }
-  }
+   /**
+    * Get the state value if it exists. If the state does not exist in state store, an
+    * empty iterator is returned.
+    */
+   override def get(): Iterator[S] = {
+     val encodedKey = stateTypesEncoder.encodeGroupingKey()
+     val unsafeRowValuesIterator = store.valuesIterator(encodedKey, stateName)
+     new Iterator[S] {
+       override def hasNext: Boolean = {
+         unsafeRowValuesIterator.hasNext
+       }
 
-  private def getAvro(): Iterator[S] = {
-    val encodedKey: Array[Byte] = avroTypesEncoder.encodeGroupingKey()
-    val avroValuesIterator = store.valuesIterator(encodedKey, stateName)
-    new Iterator[S] {
-      override def hasNext: Boolean = {
-        avroValuesIterator.hasNext
-      }
+       override def next(): S = {
+         val valueUnsafeRow = unsafeRowValuesIterator.next()
+         stateTypesEncoder.decodeValue(valueUnsafeRow)
+       }
+     }
+   }
 
-      override def next(): S = {
-        val valueRow = avroValuesIterator.next()
-        avroTypesEncoder.decodeValue(valueRow)
-      }
-    }
-  }
+   /** Update the value of the list. */
+   override def put(newState: Array[S]): Unit = {
+     validateNewState(newState)
 
-  private def getUnsafeRow(): Iterator[S] = {
-    val encodedKey = unsafeRowTypesEncoder.encodeGroupingKey()
-    val unsafeRowValuesIterator = store.valuesIterator(encodedKey, stateName)
-    new Iterator[S] {
-      override def hasNext: Boolean = {
-        unsafeRowValuesIterator.hasNext
-      }
+     val encodedKey = stateTypesEncoder.encodeGroupingKey()
+     var isFirst = true
+     var entryCount = 0L
+     TWSMetricsUtils.resetMetric(metrics, "numUpdatedStateRows")
 
-      override def next(): S = {
-        val valueUnsafeRow = unsafeRowValuesIterator.next()
-        unsafeRowTypesEncoder.decodeValue(valueUnsafeRow)
-      }
-    }
-  }
+     newState.foreach { v =>
+       val encodedValue = stateTypesEncoder.encodeValue(v)
+       if (isFirst) {
+         store.put(encodedKey, encodedValue, stateName)
+         isFirst = false
+       } else {
+         store.merge(encodedKey, encodedValue, stateName)
+       }
+       entryCount += 1
+       TWSMetricsUtils.incrementMetric(metrics, "numUpdatedStateRows")
+     }
+     updateEntryCount(encodedKey, entryCount)
+   }
 
-  /** Update the value of the list. */
-  override def put(newState: Array[S]): Unit = {
-    validateNewState(newState)
+   /** Append an entry to the list. */
+   override def appendValue(newState: S): Unit = {
+     StateStoreErrors.requireNonNullStateValue(newState, stateName)
+     val encodedKey = stateTypesEncoder.encodeGroupingKey()
+     val entryCount = getEntryCount(encodedKey)
+     store.merge(encodedKey,
+         stateTypesEncoder.encodeValue(newState), stateName)
+     TWSMetricsUtils.incrementMetric(metrics, "numUpdatedStateRows")
+     updateEntryCount(encodedKey, entryCount + 1)
+   }
 
-    if (usingAvro) {
-      putAvro(newState)
-    } else {
-      putUnsafeRow(newState)
-    }
-  }
+   /** Append an entire list to the existing value. */
+   override def appendList(newState: Array[S]): Unit = {
+     validateNewState(newState)
 
-  private def putAvro(newState: Array[S]): Unit = {
-    val encodedKey: Array[Byte] = avroTypesEncoder.encodeGroupingKey()
-    var isFirst = true
-    var entryCount = 0L
-    TWSMetricsUtils.resetMetric(metrics, "numUpdatedStateRows")
+     val encodedKey = stateTypesEncoder.encodeGroupingKey()
+     var entryCount = getEntryCount(encodedKey)
+     newState.foreach { v =>
+       val encodedValue = stateTypesEncoder.encodeValue(v)
+       store.merge(encodedKey, encodedValue, stateName)
+       entryCount += 1
+       TWSMetricsUtils.incrementMetric(metrics, "numUpdatedStateRows")
+     }
+     updateEntryCount(encodedKey, entryCount)
+   }
 
-    newState.foreach { v =>
-      val encodedValue = avroTypesEncoder.encodeValue(v)
-      if (isFirst) {
-        store.put(encodedKey, encodedValue, stateName)
-        isFirst = false
-      } else {
-        store.merge(encodedKey, encodedValue, stateName)
-      }
-      entryCount += 1
-      TWSMetricsUtils.incrementMetric(metrics, "numUpdatedStateRows")
-    }
-  }
+   /** Remove this state. */
+   override def clear(): Unit = {
+     val encodedKey = stateTypesEncoder.encodeGroupingKey()
+     store.remove(encodedKey, stateName)
+     val entryCount = getEntryCount(encodedKey)
+     TWSMetricsUtils.incrementMetric(metrics, "numRemovedStateRows", entryCount)
+     removeEntryCount(encodedKey)
+   }
 
-  private def putUnsafeRow(newState: Array[S]): Unit = {
-    val encodedKey = unsafeRowTypesEncoder.encodeGroupingKey()
-    var isFirst = true
-    var entryCount = 0L
-    TWSMetricsUtils.resetMetric(metrics, "numUpdatedStateRows")
+   private def validateNewState(newState: Array[S]): Unit = {
+     StateStoreErrors.requireNonNullStateValue(newState, stateName)
+     StateStoreErrors.requireNonEmptyListStateValue(newState, stateName)
 
-    newState.foreach { v =>
-      val encodedValue = unsafeRowTypesEncoder.encodeValue(v)
-      if (isFirst) {
-        store.put(encodedKey, encodedValue, stateName)
-        isFirst = false
-      } else {
-        store.merge(encodedKey, encodedValue, stateName)
-      }
-      entryCount += 1
-      TWSMetricsUtils.incrementMetric(metrics, "numUpdatedStateRows")
-    }
-    updateEntryCount(encodedKey, entryCount)
-  }
-
-  /** Append an entry to the list. */
-  override def appendValue(newState: S): Unit = {
-    StateStoreErrors.requireNonNullStateValue(newState, stateName)
-
-    if (usingAvro) {
-      val encodedKey: Array[Byte] = avroTypesEncoder.encodeGroupingKey()
-      val encodedValue = avroTypesEncoder.encodeValue(newState)
-      store.merge(encodedKey, encodedValue, stateName)
-      TWSMetricsUtils.incrementMetric(metrics, "numUpdatedStateRows")
-    } else {
-      val encodedKey = unsafeRowTypesEncoder.encodeGroupingKey()
-      val entryCount = getEntryCount(encodedKey)
-      val encodedValue = unsafeRowTypesEncoder.encodeValue(newState)
-      store.merge(encodedKey, encodedValue, stateName)
-      TWSMetricsUtils.incrementMetric(metrics, "numUpdatedStateRows")
-      updateEntryCount(encodedKey, entryCount + 1)
-    }
-  }
-
-  /** Append an entire list to the existing value. */
-  override def appendList(newState: Array[S]): Unit = {
-    validateNewState(newState)
-
-    if (usingAvro) {
-      val encodedKey: Array[Byte] = avroTypesEncoder.encodeGroupingKey()
-      newState.foreach { v =>
-        val encodedValue = avroTypesEncoder.encodeValue(v)
-        store.merge(encodedKey, encodedValue, stateName)
-        TWSMetricsUtils.incrementMetric(metrics, "numUpdatedStateRows")
-      }
-    } else {
-      val encodedKey = unsafeRowTypesEncoder.encodeGroupingKey()
-      var entryCount = getEntryCount(encodedKey)
-      newState.foreach { v =>
-        val encodedValue = unsafeRowTypesEncoder.encodeValue(v)
-        store.merge(encodedKey, encodedValue, stateName)
-        entryCount += 1
-        TWSMetricsUtils.incrementMetric(metrics, "numUpdatedStateRows")
-      }
-      updateEntryCount(encodedKey, entryCount)
-    }
-  }
-
-  /** Remove this state. */
-  override def clear(): Unit = {
-    if (usingAvro) {
-      val encodedKey: Array[Byte] = avroTypesEncoder.encodeGroupingKey()
-      store.remove(encodedKey, stateName)
-      // TODO: Create byte array methods for ListState Metrics
-      // val entryCount = getEntryCount(encodedKey)
-      // TWSMetricsUtils.incrementMetric(metrics, "numRemovedStateRows", entryCount)
-      // removeEntryCount(encodedKey)
-    } else {
-      val encodedKey = unsafeRowTypesEncoder.encodeGroupingKey()
-      store.remove(encodedKey, stateName)
-      val entryCount = getEntryCount(encodedKey)
-      TWSMetricsUtils.incrementMetric(metrics, "numRemovedStateRows", entryCount)
-      removeEntryCount(encodedKey)
-    }
-  }
-
-  private def validateNewState(newState: Array[S]): Unit = {
-    StateStoreErrors.requireNonNullStateValue(newState, stateName)
-    StateStoreErrors.requireNonEmptyListStateValue(newState, stateName)
-
-    newState.foreach { v =>
-      StateStoreErrors.requireNonNullStateValue(v, stateName)
-    }
-  }
-}
+     newState.foreach { v =>
+       StateStoreErrors.requireNonNullStateValue(v, stateName)
+     }
+   }
+ }

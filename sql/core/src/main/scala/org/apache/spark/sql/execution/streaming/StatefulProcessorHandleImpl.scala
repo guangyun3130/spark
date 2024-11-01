@@ -141,26 +141,8 @@ class StatefulProcessorHandleImpl(
       valEncoder: Encoder[T]): ValueState[T] = {
     verifyStateVarOperations("get_value_state", CREATED)
     val resultState = new ValueStateImpl[T](
-      store, stateName, keyEncoder, valEncoder, schemas(stateName).avroEnc, metrics)
+      store, stateName, keyEncoder, valEncoder, metrics, schemas(stateName).avroEnc)
     TWSMetricsUtils.incrementMetric(metrics, "numValueStateVars")
-    resultState
-  }
-
-  // This method is for unit-testing ValueState, as the avroEnc will not be
-  // populated unless the handle is created through the TransformWithStateExec operator
-  private[sql] def getValueStateWithAvro[T](
-      stateName: String,
-      valEncoder: Encoder[T],
-      useAvro: Boolean): ValueState[T] = {
-    verifyStateVarOperations("get_value_state", CREATED)
-    val avroEnc = if (useAvro) {
-      new StateStoreColumnFamilySchemaUtils(true).getValueStateSchema[T](
-        stateName, keyEncoder, valEncoder, hasTtl = false).avroEnc
-    } else {
-      None
-    }
-    val resultState = new ValueStateImpl[T](
-      store, stateName, keyEncoder, valEncoder, avroEnc)
     resultState
   }
 
@@ -173,7 +155,7 @@ class StatefulProcessorHandleImpl(
 
     assert(batchTimestampMs.isDefined)
     val valueStateWithTTL = new ValueStateImplWithTTL[T](store, stateName,
-      keyEncoder, valEncoder, ttlConfig, batchTimestampMs.get, avroEnc = None, metrics)
+      keyEncoder, valEncoder, ttlConfig, batchTimestampMs.get, metrics)
     ttlStates.add(valueStateWithTTL)
     TWSMetricsUtils.incrementMetric(metrics, "numValueStateWithTTLVars")
 
@@ -252,27 +234,8 @@ class StatefulProcessorHandleImpl(
 
   override def getListState[T](stateName: String, valEncoder: Encoder[T]): ListState[T] = {
     verifyStateVarOperations("get_list_state", CREATED)
-    val resultState = new ListStateImpl[T](
-      store, stateName, keyEncoder, valEncoder, schemas(stateName).avroEnc, metrics)
+    val resultState = new ListStateImpl[T](store, stateName, keyEncoder, valEncoder, metrics)
     TWSMetricsUtils.incrementMetric(metrics, "numListStateVars")
-    resultState
-  }
-
-  // This method is for unit-testing ListState, as the avroEnc will not be
-  // populated unless the handle is created through the TransformWithStateExec operator
-  private[sql] def getListStateWithAvro[T](
-      stateName: String,
-      valEncoder: Encoder[T],
-      useAvro: Boolean): ListState[T] = {
-    verifyStateVarOperations("get_list_state", CREATED)
-    val avroEnc = if (useAvro) {
-      new StateStoreColumnFamilySchemaUtils(true).getListStateSchema[T](
-        stateName, keyEncoder, valEncoder, hasTtl = false).avroEnc
-    } else {
-      None
-    }
-    val resultState = new ListStateImpl[T](
-      store, stateName, keyEncoder, valEncoder, avroEnc)
     resultState
   }
 
@@ -301,7 +264,7 @@ class StatefulProcessorHandleImpl(
 
     assert(batchTimestampMs.isDefined)
     val listStateWithTTL = new ListStateImplWithTTL[T](store, stateName,
-      keyEncoder, valEncoder, ttlConfig, batchTimestampMs.get, avroEnc = None, metrics)
+      keyEncoder, valEncoder, ttlConfig, batchTimestampMs.get, metrics)
     TWSMetricsUtils.incrementMetric(metrics, "numListStateWithTTLVars")
     ttlStates.add(listStateWithTTL)
 
@@ -314,7 +277,7 @@ class StatefulProcessorHandleImpl(
       valEncoder: Encoder[V]): MapState[K, V] = {
     verifyStateVarOperations("get_map_state", CREATED)
     val resultState = new MapStateImpl[K, V](store, stateName, keyEncoder,
-      userKeyEnc, valEncoder, avroEnc = None, metrics)
+      userKeyEnc, valEncoder, metrics)
     TWSMetricsUtils.incrementMetric(metrics, "numMapStateVars")
     resultState
   }
@@ -329,7 +292,7 @@ class StatefulProcessorHandleImpl(
 
     assert(batchTimestampMs.isDefined)
     val mapStateWithTTL = new MapStateImplWithTTL[K, V](store, stateName, keyEncoder, userKeyEnc,
-      valEncoder, ttlConfig, batchTimestampMs.get, avroEnc = None, metrics)
+      valEncoder, ttlConfig, batchTimestampMs.get, metrics)
     TWSMetricsUtils.incrementMetric(metrics, "numMapStateWithTTLVars")
     ttlStates.add(mapStateWithTTL)
 

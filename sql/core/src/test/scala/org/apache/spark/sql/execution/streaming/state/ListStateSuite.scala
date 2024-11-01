@@ -34,15 +34,13 @@ class ListStateSuite extends StateVariableSuiteBase {
   // overwrite useMultipleValuesPerKey in base suite to be true for list state
   override def useMultipleValuesPerKey: Boolean = true
 
-  private def testMapStateWithNullUserKey(useAvro: Boolean)
-      (runListOps: ListState[Long] => Unit): Unit = {
+  private def testMapStateWithNullUserKey()(runListOps: ListState[Long] => Unit): Unit = {
     tryWithProviderResource(newStoreProviderWithStateVariable(true)) { provider =>
       val store = provider.getStore(0)
       val handle = new StatefulProcessorHandleImpl(store, UUID.randomUUID(),
         stringEncoder, TimeMode.None())
 
-      val listState: ListState[Long] = handle.getListStateWithAvro[Long](
-        "listState", Encoders.scalaLong, useAvro)
+      val listState: ListState[Long] = handle.getListState[Long]("listState", Encoders.scalaLong)
 
       ImplicitGroupingKeyTracker.setImplicitKey("test_key")
       val e = intercept[SparkIllegalArgumentException] {
@@ -59,8 +57,8 @@ class ListStateSuite extends StateVariableSuiteBase {
   }
 
   Seq("appendList", "put").foreach { listImplFunc =>
-    testWithAvroEnc(s"Test list operation($listImplFunc) with null") { useAvro =>
-      testMapStateWithNullUserKey(useAvro) { listState =>
+    test(s"Test list operation($listImplFunc) with null") {
+      testMapStateWithNullUserKey() { listState =>
         listImplFunc match {
           case "appendList" => listState.appendList(null)
           case "put" => listState.put(null)
@@ -69,14 +67,13 @@ class ListStateSuite extends StateVariableSuiteBase {
     }
   }
 
-  testWithAvroEnc("List state operations for single instance") { useAvro =>
+  test("List state operations for single instance") {
     tryWithProviderResource(newStoreProviderWithStateVariable(true)) { provider =>
       val store = provider.getStore(0)
       val handle = new StatefulProcessorHandleImpl(store, UUID.randomUUID(),
         stringEncoder, TimeMode.None())
 
-      val testState: ListState[Long] = handle.getListStateWithAvro[Long](
-        "testState", Encoders.scalaLong, useAvro)
+      val testState: ListState[Long] = handle.getListState[Long]("testState", Encoders.scalaLong)
       ImplicitGroupingKeyTracker.setImplicitKey("test_key")
 
       // simple put and get test
@@ -98,16 +95,14 @@ class ListStateSuite extends StateVariableSuiteBase {
     }
   }
 
-  testWithAvroEnc("List state operations for multiple instance") { useAvro =>
+  test("List state operations for multiple instance") {
     tryWithProviderResource(newStoreProviderWithStateVariable(true)) { provider =>
       val store = provider.getStore(0)
       val handle = new StatefulProcessorHandleImpl(store, UUID.randomUUID(),
         stringEncoder, TimeMode.None())
 
-      val testState1: ListState[Long] = handle.getListStateWithAvro[Long](
-        "testState1", Encoders.scalaLong, useAvro)
-      val testState2: ListState[Long] = handle.getListStateWithAvro[Long](
-        "testState2", Encoders.scalaLong, useAvro)
+      val testState1: ListState[Long] = handle.getListState[Long]("testState1", Encoders.scalaLong)
+      val testState2: ListState[Long] = handle.getListState[Long]("testState2", Encoders.scalaLong)
 
       ImplicitGroupingKeyTracker.setImplicitKey("test_key")
 
@@ -138,18 +133,16 @@ class ListStateSuite extends StateVariableSuiteBase {
     }
   }
 
-  testWithAvroEnc("List state operations with list, value, another list instances") { useAvro =>
+  test("List state operations with list, value, another list instances") {
     tryWithProviderResource(newStoreProviderWithStateVariable(true)) { provider =>
       val store = provider.getStore(0)
       val handle = new StatefulProcessorHandleImpl(store, UUID.randomUUID(),
         stringEncoder, TimeMode.None())
 
-      val listState1: ListState[Long] = handle.getListStateWithAvro[Long](
-        "listState1", Encoders.scalaLong, useAvro)
-      val listState2: ListState[Long] = handle.getListStateWithAvro[Long](
-        "listState2", Encoders.scalaLong, useAvro)
-      val valueState: ValueState[Long] = handle.getValueStateWithAvro[Long](
-        "valueState", Encoders.scalaLong, useAvro = false)
+      val listState1: ListState[Long] = handle.getListState[Long]("listState1", Encoders.scalaLong)
+      val listState2: ListState[Long] = handle.getListState[Long]("listState2", Encoders.scalaLong)
+      val valueState: ValueState[Long] = handle.getValueState[Long](
+        "valueState", Encoders.scalaLong)
 
       ImplicitGroupingKeyTracker.setImplicitKey("test_key")
       // simple put and get test
@@ -252,7 +245,7 @@ class ListStateSuite extends StateVariableSuiteBase {
     }
   }
 
-  testWithAvroEnc("ListState TTL with non-primitive types") { useAvro =>
+  test("ListState TTL with non-primitive types") {
     tryWithProviderResource(newStoreProviderWithStateVariable(true)) { provider =>
       val store = provider.getStore(0)
       val timestampMs = 10

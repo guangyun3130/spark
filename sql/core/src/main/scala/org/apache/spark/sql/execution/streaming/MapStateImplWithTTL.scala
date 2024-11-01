@@ -22,7 +22,7 @@ import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.catalyst.expressions.UnsafeRow
 import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.execution.streaming.TransformWithStateKeyValueRowSchemaUtils._
-import org.apache.spark.sql.execution.streaming.state.{AvroEncoderSpec, PrefixKeyScanStateEncoderSpec, StateStore, StateStoreErrors}
+import org.apache.spark.sql.execution.streaming.state.{PrefixKeyScanStateEncoderSpec, StateStore, StateStoreErrors}
 import org.apache.spark.sql.streaming.{MapState, TTLConfig}
 import org.apache.spark.util.NextIterator
 
@@ -36,7 +36,6 @@ import org.apache.spark.util.NextIterator
  * @param valEncoder - SQL encoder for state variable
  * @param ttlConfig  - the ttl configuration (time to live duration etc.)
  * @param batchTimestampMs - current batch processing timestamp.
- * @param avroEnc: Optional Avro encoder and decoder to convert between S and Avro row
  * @param metrics - metrics to be updated as part of stateful processing
  * @tparam K - type of key for map state variable
  * @tparam V - type of value for map state variable
@@ -50,13 +49,12 @@ class MapStateImplWithTTL[K, V](
     valEncoder: Encoder[V],
     ttlConfig: TTLConfig,
     batchTimestampMs: Long,
-    avroEnc: Option[AvroEncoderSpec], // TODO: Add Avro Encoding support for TTL
     metrics: Map[String, SQLMetric] = Map.empty)
   extends CompositeKeyTTLStateImpl[K](stateName, store,
     keyExprEnc, userKeyEnc, batchTimestampMs)
   with MapState[K, V] with Logging {
 
-  private val stateTypesEncoder = new CompositeKeyUnsafeRowEncoder(
+  private val stateTypesEncoder = new CompositeKeyStateEncoder(
     keyExprEnc, userKeyEnc, valEncoder, stateName, hasTtl = true)
 
   private val ttlExpirationMs =

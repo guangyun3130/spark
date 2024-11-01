@@ -104,9 +104,10 @@ case class TransformWithStateExec(
    * @return a new instance of the driver processor handle
    */
   private def getDriverProcessorHandle(): DriverStatefulProcessorHandleImpl = {
+
     val driverProcessorHandle = new DriverStatefulProcessorHandleImpl(
       timeMode, keyEncoder, initializeAvroEnc =
-        StatefulOperatorUtils.stateStoreEncoding == StateStoreEncoding.Avro.toString)
+        stateStoreEncoding == StateStoreEncoding.Avro.toString)
     driverProcessorHandle.setHandleState(StatefulProcessorHandleState.PRE_INIT)
     statefulProcessor.setHandle(driverProcessorHandle)
     statefulProcessor.init(outputMode, timeMode)

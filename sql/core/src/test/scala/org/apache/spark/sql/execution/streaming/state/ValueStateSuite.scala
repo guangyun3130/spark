@@ -23,7 +23,7 @@ import java.util.UUID
 import scala.util.Random
 
 import org.apache.hadoop.conf.Configuration
-import org.scalatest.{BeforeAndAfter, Tag}
+import org.scalatest.BeforeAndAfter
 
 import org.apache.spark.{SparkException, SparkUnsupportedOperationException}
 import org.apache.spark.sql.Encoders
@@ -45,15 +45,14 @@ class ValueStateSuite extends StateVariableSuiteBase {
 
   import StateStoreTestsHelper._
 
-  testWithAvroEnc("Implicit key operations") { useAvro =>
+  test("Implicit key operations") {
     tryWithProviderResource(newStoreProviderWithStateVariable(true)) { provider =>
       val store = provider.getStore(0)
       val handle = new StatefulProcessorHandleImpl(store, UUID.randomUUID(),
         stringEncoder, TimeMode.None())
 
       val stateName = "testState"
-      val testState: ValueState[Long] = handle.getValueStateWithAvro[Long](
-        "testState", Encoders.scalaLong, useAvro)
+      val testState: ValueState[Long] = handle.getValueState[Long]("testState", Encoders.scalaLong)
       assert(ImplicitGroupingKeyTracker.getImplicitKeyOption.isEmpty)
       val ex = intercept[Exception] {
         testState.update(123)
@@ -90,14 +89,13 @@ class ValueStateSuite extends StateVariableSuiteBase {
     }
   }
 
-  testWithAvroEnc("Value state operations for single instance") { useAvro =>
+  test("Value state operations for single instance") {
     tryWithProviderResource(newStoreProviderWithStateVariable(true)) { provider =>
       val store = provider.getStore(0)
       val handle = new StatefulProcessorHandleImpl(store, UUID.randomUUID(),
         stringEncoder, TimeMode.None())
 
-      val testState: ValueState[Long] = handle.getValueStateWithAvro[Long](
-        "testState", Encoders.scalaLong, useAvro)
+      val testState: ValueState[Long] = handle.getValueState[Long]("testState", Encoders.scalaLong)
       ImplicitGroupingKeyTracker.setImplicitKey("test_key")
       testState.update(123)
       assert(testState.get() === 123)
@@ -117,16 +115,16 @@ class ValueStateSuite extends StateVariableSuiteBase {
     }
   }
 
-  testWithAvroEnc("Value state operations for multiple instances") { useAvro =>
+  test("Value state operations for multiple instances") {
     tryWithProviderResource(newStoreProviderWithStateVariable(true)) { provider =>
       val store = provider.getStore(0)
       val handle = new StatefulProcessorHandleImpl(store, UUID.randomUUID(),
         stringEncoder, TimeMode.None())
 
-      val testState1: ValueState[Long] = handle.getValueStateWithAvro[Long](
-        "testState1", Encoders.scalaLong, useAvro)
-      val testState2: ValueState[Long] = handle.getValueStateWithAvro[Long](
-        "testState2", Encoders.scalaLong, useAvro)
+      val testState1: ValueState[Long] = handle.getValueState[Long](
+        "testState1", Encoders.scalaLong)
+      val testState2: ValueState[Long] = handle.getValueState[Long](
+        "testState2", Encoders.scalaLong)
       ImplicitGroupingKeyTracker.setImplicitKey("test_key")
       testState1.update(123)
       assert(testState1.get() === 123)
@@ -162,7 +160,7 @@ class ValueStateSuite extends StateVariableSuiteBase {
     }
   }
 
-  testWithAvroEnc("Value state operations for unsupported type name should fail") { useAvro =>
+  test("Value state operations for unsupported type name should fail") {
     tryWithProviderResource(newStoreProviderWithStateVariable(true)) { provider =>
       val store = provider.getStore(0)
       val handle = new StatefulProcessorHandleImpl(store,
@@ -170,7 +168,7 @@ class ValueStateSuite extends StateVariableSuiteBase {
 
       val cfName = "$testState"
       val ex = intercept[SparkUnsupportedOperationException] {
-        handle.getValueStateWithAvro[Long](cfName, Encoders.scalaLong, useAvro)
+        handle.getValueState[Long](cfName, Encoders.scalaLong)
       }
       checkError(
         ex,
@@ -202,15 +200,14 @@ class ValueStateSuite extends StateVariableSuiteBase {
     )
   }
 
-  testWithAvroEnc("test SQL encoder - Value state operations" +
-    " for Primitive(Double) instances") { useAvro =>
+  test("test SQL encoder - Value state operations for Primitive(Double) instances") {
     tryWithProviderResource(newStoreProviderWithStateVariable(true)) { provider =>
       val store = provider.getStore(0)
       val handle = new StatefulProcessorHandleImpl(store, UUID.randomUUID(),
         stringEncoder, TimeMode.None())
 
-      val testState: ValueState[Double] = handle.getValueStateWithAvro[Double]("testState",
-        Encoders.scalaDouble, useAvro)
+      val testState: ValueState[Double] = handle.getValueState[Double]("testState",
+        Encoders.scalaDouble)
       ImplicitGroupingKeyTracker.setImplicitKey("test_key")
       testState.update(1.0)
       assert(testState.get().equals(1.0))
@@ -229,15 +226,14 @@ class ValueStateSuite extends StateVariableSuiteBase {
     }
   }
 
-  testWithAvroEnc("test SQL encoder - Value state operations" +
-    " for Primitive(Long) instances") { useAvro =>
+  test("test SQL encoder - Value state operations for Primitive(Long) instances") {
     tryWithProviderResource(newStoreProviderWithStateVariable(true)) { provider =>
       val store = provider.getStore(0)
       val handle = new StatefulProcessorHandleImpl(store, UUID.randomUUID(),
         stringEncoder, TimeMode.None())
 
-      val testState: ValueState[Long] = handle.getValueStateWithAvro[Long]("testState",
-        Encoders.scalaLong, useAvro)
+      val testState: ValueState[Long] = handle.getValueState[Long]("testState",
+        Encoders.scalaLong)
       ImplicitGroupingKeyTracker.setImplicitKey("test_key")
       testState.update(1L)
       assert(testState.get().equals(1L))
@@ -256,15 +252,14 @@ class ValueStateSuite extends StateVariableSuiteBase {
     }
   }
 
-  testWithAvroEnc("test SQL encoder - Value state operations" +
-    " for case class instances") { useAvro =>
+  test("test SQL encoder - Value state operations for case class instances") {
     tryWithProviderResource(newStoreProviderWithStateVariable(true)) { provider =>
       val store = provider.getStore(0)
       val handle = new StatefulProcessorHandleImpl(store, UUID.randomUUID(),
         stringEncoder, TimeMode.None())
 
-      val testState: ValueState[TestClass] = handle.getValueStateWithAvro[TestClass]("testState",
-        Encoders.product[TestClass], useAvro)
+      val testState: ValueState[TestClass] = handle.getValueState[TestClass]("testState",
+        Encoders.product[TestClass])
       ImplicitGroupingKeyTracker.setImplicitKey("test_key")
       testState.update(TestClass(1, "testcase1"))
       assert(testState.get().equals(TestClass(1, "testcase1")))
@@ -283,14 +278,14 @@ class ValueStateSuite extends StateVariableSuiteBase {
     }
   }
 
-  testWithAvroEnc("test SQL encoder - Value state operations for POJO instances") { useAvro =>
+  test("test SQL encoder - Value state operations for POJO instances") {
     tryWithProviderResource(newStoreProviderWithStateVariable(true)) { provider =>
       val store = provider.getStore(0)
       val handle = new StatefulProcessorHandleImpl(store, UUID.randomUUID(),
         stringEncoder, TimeMode.None())
 
-      val testState: ValueState[POJOTestClass] = handle.getValueStateWithAvro[POJOTestClass](
-        "testState", Encoders.bean(classOf[POJOTestClass]), useAvro)
+      val testState: ValueState[POJOTestClass] = handle.getValueState[POJOTestClass]("testState",
+        Encoders.bean(classOf[POJOTestClass]))
       ImplicitGroupingKeyTracker.setImplicitKey("test_key")
       testState.update(new POJOTestClass("testcase1", 1))
       assert(testState.get().equals(new POJOTestClass("testcase1", 1)))
@@ -479,26 +474,5 @@ abstract class StateVariableSuiteBase extends SharedSparkSession
       provider.close()
     }
   }
-
-  def testWithAvroEnc(testName: String, testTags: Tag*)(testBody: Boolean => Any): Unit = {
-    // Run with serde (true)
-    super.test(testName + " (with Avro encoding)", testTags: _*) {
-      super.beforeEach()
-      try {
-        testBody(true)
-      } finally {
-        super.afterEach()
-      }
-    }
-
-    // Run without serde (false)
-    super.test(testName, testTags: _*) {
-      super.beforeEach()
-      try {
-        testBody(false)
-      } finally {
-        super.afterEach()
-      }
-    }
-  }
 }
+

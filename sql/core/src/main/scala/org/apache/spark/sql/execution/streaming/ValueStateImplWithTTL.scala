@@ -21,7 +21,7 @@ import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.catalyst.expressions.UnsafeRow
 import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.execution.streaming.TransformWithStateKeyValueRowSchemaUtils._
-import org.apache.spark.sql.execution.streaming.state.{AvroEncoderSpec, NoPrefixKeyStateEncoderSpec, StateStore}
+import org.apache.spark.sql.execution.streaming.state.{NoPrefixKeyStateEncoderSpec, StateStore}
 import org.apache.spark.sql.streaming.{TTLConfig, ValueState}
 
 /**
@@ -34,7 +34,6 @@ import org.apache.spark.sql.streaming.{TTLConfig, ValueState}
  * @param valEncoder - Spark SQL encoder for value
  * @param ttlConfig  - TTL configuration for values  stored in this state
  * @param batchTimestampMs - current batch processing timestamp.
- * @param avroEnc: Optional Avro encoder and decoder to convert between S and Avro row
  * @param metrics - metrics to be updated as part of stateful processing
  * @tparam S - data type of object that will be stored
  */
@@ -45,12 +44,11 @@ class ValueStateImplWithTTL[S](
     valEncoder: Encoder[S],
     ttlConfig: TTLConfig,
     batchTimestampMs: Long,
-    avroEnc: Option[AvroEncoderSpec],   // TODO: Add Avro Encoding support for TTL
     metrics: Map[String, SQLMetric] = Map.empty)
   extends SingleKeyTTLStateImpl(
     stateName, store, keyExprEnc, batchTimestampMs) with ValueState[S] {
 
-  private val stateTypesEncoder = UnsafeRowTypesEncoder(keyExprEnc, valEncoder,
+  private val stateTypesEncoder = StateTypesEncoder(keyExprEnc, valEncoder,
     stateName, hasTtl = true)
   private val ttlExpirationMs =
     StateTTL.calculateExpirationTimeForDuration(ttlConfig.ttlDuration, batchTimestampMs)
