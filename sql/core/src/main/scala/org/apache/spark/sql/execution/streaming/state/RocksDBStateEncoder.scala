@@ -22,11 +22,12 @@ import java.lang.Double.{doubleToRawLongBits, longBitsToDouble}
 import java.lang.Float.{floatToRawIntBits, intBitsToFloat}
 import java.nio.{ByteBuffer, ByteOrder}
 
+import org.apache.avro.Schema
 import org.apache.avro.generic.{GenericDatumReader, GenericDatumWriter}
 import org.apache.avro.io.{DecoderFactory, EncoderFactory}
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.avro.SchemaConverters
+import org.apache.spark.sql.avro.{AvroDeserializer, AvroSerializer, SchemaConverters}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{BoundReference, JoinedRow, UnsafeProjection, UnsafeRow}
 import org.apache.spark.sql.catalyst.expressions.codegen.UnsafeRowWriter
@@ -154,6 +155,22 @@ object RocksDBStateEncoder {
     encodedBytes
   }
 
+  def encodeUnsafeRow(
+     row: UnsafeRow,
+     avroSerializer: AvroSerializer,
+     valueAvroType: Schema,
+     out: ByteArrayOutputStream): Array[Byte] = {
+    val avroData =
+      avroSerializer.serialize(row) // InternalRow -> GenericDataRecord
+    out.reset()
+    val encoder = EncoderFactory.get().directBinaryEncoder(out, null)
+    val writer = new GenericDatumWriter[Any](
+      valueAvroType) // Defining Avro writer for this struct type
+    writer.write(avroData, encoder) // GenericDataRecord -> bytes
+    encoder.flush()
+    out.toByteArray
+  }
+
   def decodeToUnsafeRow(bytes: Array[Byte], numFields: Int): UnsafeRow = {
     if (bytes != null) {
       val row = new UnsafeRow(numFields)
@@ -161,6 +178,20 @@ object RocksDBStateEncoder {
     } else {
       null
     }
+  }
+
+
+  def decodeToUnsafeRow(
+      valueBytes: Array[Byte],
+      avroDeserializer: AvroDeserializer,
+      valueAvroType: Schema,
+      valueProj: UnsafeProjection): UnsafeRow = {
+    val reader = new GenericDatumReader[Any](valueAvroType)
+    val decoder = DecoderFactory.get().binaryDecoder(valueBytes, 0, valueBytes.length, null)
+    val genericData = reader.read(null, decoder) // bytes -> GenericDataRecord
+    val internalRow = avroDeserializer.deserialize(
+      genericData).orNull.asInstanceOf[InternalRow]
+    valueProj.apply(internalRow)
   }
 
   def decodeToUnsafeRow(bytes: Array[Byte], reusedRow: UnsafeRow): UnsafeRow = {
@@ -767,15 +798,7 @@ class MultiValuedStateEncoder(
 
   override def encodeValue(row: UnsafeRow): Array[Byte] = {
     val bytes = if (avroEnc.isDefined) {
-      val avroData =
-        avroEnc.get.valueSerializer.serialize(row) // InternalRow -> GenericDataRecord
-      out.reset()
-      val encoder = EncoderFactory.get().directBinaryEncoder(out, null)
-      val writer = new GenericDatumWriter[Any](
-        valueAvroType) // Defining Avro writer for this struct type
-      writer.write(avroData, encoder) // GenericDataRecord -> bytes
-      encoder.flush()
-      out.toByteArray
+      encodeUnsafeRow(row, avroEnc.get.valueSerializer, valueAvroType, out)
     } else {
       encodeUnsafeRow(row)
     }
@@ -798,13 +821,8 @@ class MultiValuedStateEncoder(
       Platform.copyMemory(valueBytes, java.lang.Integer.BYTES + Platform.BYTE_ARRAY_OFFSET,
         encodedValue, Platform.BYTE_ARRAY_OFFSET, numBytes)
       if (avroEnc.isDefined) {
-        val reader = new GenericDatumReader[Any](valueAvroType)
-        val decoder = DecoderFactory.get().binaryDecoder(encodedValue,
-          0, encodedValue.length, null)
-        val genericData = reader.read(null, decoder) // bytes -> GenericDataRecord
-        val internalRow = avroEnc.get.valueDeserializer.deserialize(
-          genericData).orNull.asInstanceOf[InternalRow]
-        valueProj.apply(internalRow)
+        decodeToUnsafeRow(
+          valueBytes, avroEnc.get.valueDeserializer, valueAvroType, valueProj)
       } else {
         decodeToUnsafeRow(encodedValue, valueRow)
       }
@@ -834,13 +852,8 @@ class MultiValuedStateEncoder(
           pos += numBytes
           pos += 1 // eat the delimiter character
           if (avroEnc.isDefined) {
-            val reader = new GenericDatumReader[Any](valueAvroType)
-            val decoder = DecoderFactory.get().binaryDecoder(encodedValue,
-              0, encodedValue.length, null)
-            val genericData = reader.read(null, decoder) // bytes -> GenericDataRecord
-            val internalRow = avroEnc.get.valueDeserializer.deserialize(
-              genericData).orNull.asInstanceOf[InternalRow]
-            valueProj.apply(internalRow)
+            decodeToUnsafeRow(
+              valueBytes, avroEnc.get.valueDeserializer, valueAvroType, valueProj)
           } else {
             decodeToUnsafeRow(encodedValue, valueRow)
           }
@@ -879,15 +892,7 @@ class SingleValueStateEncoder(
 
   override def encodeValue(row: UnsafeRow): Array[Byte] = {
     if (avroEnc.isDefined) {
-      val avroData =
-        avroEnc.get.valueSerializer.serialize(row) // InternalRow -> GenericDataRecord
-      out.reset()
-      val encoder = EncoderFactory.get().directBinaryEncoder(out, null)
-      val writer = new GenericDatumWriter[Any](
-        valueAvroType) // Defining Avro writer for this struct type
-      writer.write(avroData, encoder) // GenericDataRecord -> bytes
-      encoder.flush()
-      out.toByteArray
+      encodeUnsafeRow(row, avroEnc.get.valueSerializer, valueAvroType, out)
     } else {
       encodeUnsafeRow(row)
     }
@@ -904,12 +909,8 @@ class SingleValueStateEncoder(
       return null
     }
     if (avroEnc.isDefined) {
-      val reader = new GenericDatumReader[Any](valueAvroType)
-      val decoder = DecoderFactory.get().binaryDecoder(valueBytes, 0, valueBytes.length, null)
-      val genericData = reader.read(null, decoder) // bytes -> GenericDataRecord
-      val internalRow = avroEnc.get.valueDeserializer.deserialize(
-        genericData).orNull.asInstanceOf[InternalRow]
-      valueProj.apply(internalRow)
+      decodeToUnsafeRow(
+        valueBytes, avroEnc.get.valueDeserializer, valueAvroType, valueProj)
     } else {
       decodeToUnsafeRow(valueBytes, valueRow)
     }
