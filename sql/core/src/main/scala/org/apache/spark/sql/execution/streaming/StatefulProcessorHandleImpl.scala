@@ -96,6 +96,8 @@ class QueryInfoImpl(
  * @param isStreaming - defines whether the query is streaming or batch
  * @param batchTimestampMs - timestamp for the current batch if available
  * @param metrics - metrics to be updated as part of stateful processing
+ * @param schemas - StateStoreColumnFamilySchemas that include Avro serializers and deserializers
+ *                for each state variable, if Avro encoding is enabled for this query
  */
 class StatefulProcessorHandleImpl(
     store: StateStore,

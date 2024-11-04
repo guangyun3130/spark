@@ -133,7 +133,8 @@ trait StateStore extends ReadStateStore {
 
   /**
    * Create column family with given name, if absent.
-   *
+   * If Avro encoding is enabled for this query, we expect the avroEncoderSpec to
+   * be defined so that the Key and Value StateEncoders will use this.
    * @return column family ID
    */
   def createColFamilyIfAbsent(

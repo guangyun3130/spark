@@ -155,18 +155,22 @@ object RocksDBStateEncoder {
     encodedBytes
   }
 
+  /**
+   * This method takes an UnsafeRow, and serializes to a byte array using Avro encoding.
+   */
   def encodeUnsafeRow(
      row: UnsafeRow,
      avroSerializer: AvroSerializer,
      valueAvroType: Schema,
      out: ByteArrayOutputStream): Array[Byte] = {
+    // InternalRow -> Avro.GenericDataRecord
     val avroData =
-      avroSerializer.serialize(row) // InternalRow -> GenericDataRecord
+      avroSerializer.serialize(row)
     out.reset()
     val encoder = EncoderFactory.get().directBinaryEncoder(out, null)
     val writer = new GenericDatumWriter[Any](
       valueAvroType) // Defining Avro writer for this struct type
-    writer.write(avroData, encoder) // GenericDataRecord -> bytes
+    writer.write(avroData, encoder) // Avro.GenericDataRecord -> byte array
     encoder.flush()
     out.toByteArray
   }
@@ -180,7 +184,10 @@ object RocksDBStateEncoder {
     }
   }
 
-
+  /**
+   * This method takes a byte array written using Avro encoding, and
+   * deserializes to an UnsafeRow using the Avro deserializer
+   */
   def decodeToUnsafeRow(
       valueBytes: Array[Byte],
       avroDeserializer: AvroDeserializer,
@@ -188,9 +195,12 @@ object RocksDBStateEncoder {
       valueProj: UnsafeProjection): UnsafeRow = {
     val reader = new GenericDatumReader[Any](valueAvroType)
     val decoder = DecoderFactory.get().binaryDecoder(valueBytes, 0, valueBytes.length, null)
-    val genericData = reader.read(null, decoder) // bytes -> GenericDataRecord
+    // bytes -> Avro.GenericDataRecord
+    val genericData = reader.read(null, decoder)
+    // Avro.GenericDataRecord -> InternalRow
     val internalRow = avroDeserializer.deserialize(
       genericData).orNull.asInstanceOf[InternalRow]
+    // InternalRow -> UnsafeRow
     valueProj.apply(internalRow)
   }
 
@@ -214,6 +224,8 @@ object RocksDBStateEncoder {
  * @param keySchema - schema of the key to be encoded
  * @param numColsPrefixKey - number of columns to be used for prefix key
  * @param useColumnFamilies - if column family is enabled for this encoder
+ * @param avroEnc - if Avro encoding is specified for this StateEncoder, this encoder will
+ *                be defined
  */
 class PrefixKeyScanStateEncoder(
     keySchema: StructType,
@@ -308,7 +320,6 @@ class PrefixKeyScanStateEncoder(
   }
 
   override def supportPrefixKeyScan: Boolean = true
-
 }
 
 /**
@@ -341,6 +352,8 @@ class PrefixKeyScanStateEncoder(
  * @param keySchema - schema of the key to be encoded
  * @param orderingOrdinals - the ordinals for which the range scan is constructed
  * @param useColumnFamilies - if column family is enabled for this encoder
+ * @param avroEnc - if Avro encoding is specified for this StateEncoder, this encoder will
+ *                be defined
  */
 class RangeKeyScanStateEncoder(
     keySchema: StructType,
@@ -700,6 +713,7 @@ class RangeKeyScanStateEncoder(
  *    The bytes of a UnsafeRow is written unmodified to starting from offset 1
  *    (offset 0 is the version byte of value 0). That is, if the unsafe row has N bytes,
  *    then the generated array byte will be N+1 bytes.
+ * If the avroEnc is specified, we are using Avro encoding for this column family's keys
  */
 class NoPrefixKeyStateEncoder(
     keySchema: StructType,
@@ -711,6 +725,7 @@ class NoPrefixKeyStateEncoder(
   import RocksDBStateEncoder._
 
   // Reusable objects
+  private val usingAvroEncoding = avroEnc.isDefined
   private val keyRow = new UnsafeRow(keySchema.size)
   private val keyAvroType = SchemaConverters.toAvroType(keySchema)
 
@@ -720,7 +735,7 @@ class NoPrefixKeyStateEncoder(
     } else {
       // If avroEnc is defined, we know that we need to use Avro to
       // encode this UnsafeRow to Avro bytes
-      val bytesToEncode = if (avroEnc.isDefined) {
+      val bytesToEncode = if (usingAvroEncoding) {
         val avroData = avroEnc.get.keySerializer.serialize(row)
         out.reset()
         val encoder = EncoderFactory.get().directBinaryEncoder(out, null)
@@ -782,6 +797,7 @@ class NoPrefixKeyStateEncoder(
  * This encoder supports RocksDB StringAppendOperator merge operator. Values encoded can be
  * merged in RocksDB using merge operation, and all merged values can be read using decodeValues
  * operation.
+ * If the avroEnc is specified, we are using Avro encoding for this column family's values
  */
 class MultiValuedStateEncoder(
     valueSchema: StructType,
@@ -790,6 +806,7 @@ class MultiValuedStateEncoder(
 
   import RocksDBStateEncoder._
 
+  private val usingAvroEncoding = avroEnc.isDefined
   // Reusable objects
   private val out = new ByteArrayOutputStream
   private val valueRow = new UnsafeRow(valueSchema.size)
@@ -797,7 +814,7 @@ class MultiValuedStateEncoder(
   private val valueProj = UnsafeProjection.create(valueSchema)
 
   override def encodeValue(row: UnsafeRow): Array[Byte] = {
-    val bytes = if (avroEnc.isDefined) {
+    val bytes = if (usingAvroEncoding) {
       encodeUnsafeRow(row, avroEnc.get.valueSerializer, valueAvroType, out)
     } else {
       encodeUnsafeRow(row)
@@ -820,7 +837,7 @@ class MultiValuedStateEncoder(
       val encodedValue = new Array[Byte](numBytes)
       Platform.copyMemory(valueBytes, java.lang.Integer.BYTES + Platform.BYTE_ARRAY_OFFSET,
         encodedValue, Platform.BYTE_ARRAY_OFFSET, numBytes)
-      if (avroEnc.isDefined) {
+      if (usingAvroEncoding) {
         decodeToUnsafeRow(
           encodedValue, avroEnc.get.valueDeserializer, valueAvroType, valueProj)
       } else {
@@ -851,7 +868,7 @@ class MultiValuedStateEncoder(
 
           pos += numBytes
           pos += 1 // eat the delimiter character
-          if (avroEnc.isDefined) {
+          if (usingAvroEncoding) {
             decodeToUnsafeRow(
               encodedValue, avroEnc.get.valueDeserializer, valueAvroType, valueProj)
           } else {
@@ -876,6 +893,7 @@ class MultiValuedStateEncoder(
  *    The bytes of a UnsafeRow is written unmodified to starting from offset 1
  *    (offset 0 is the version byte of value 0). That is, if the unsafe row has N bytes,
  *    then the generated array byte will be N+1 bytes.
+ * If the avroEnc is specified, we are using Avro encoding for this column family's values
  */
 class SingleValueStateEncoder(
     valueSchema: StructType,
@@ -884,6 +902,7 @@ class SingleValueStateEncoder(
 
   import RocksDBStateEncoder._
 
+  private val usingAvroEncoding = avroEnc.isDefined
   // Reusable objects
   private val out = new ByteArrayOutputStream
   private val valueRow = new UnsafeRow(valueSchema.size)
@@ -891,7 +910,7 @@ class SingleValueStateEncoder(
   private val valueProj = UnsafeProjection.create(valueSchema)
 
   override def encodeValue(row: UnsafeRow): Array[Byte] = {
-    if (avroEnc.isDefined) {
+    if (usingAvroEncoding) {
       encodeUnsafeRow(row, avroEnc.get.valueSerializer, valueAvroType, out)
     } else {
       encodeUnsafeRow(row)
@@ -908,7 +927,7 @@ class SingleValueStateEncoder(
     if (valueBytes == null) {
       return null
     }
-    if (avroEnc.isDefined) {
+    if (usingAvroEncoding) {
       decodeToUnsafeRow(
         valueBytes, avroEnc.get.valueDeserializer, valueAvroType, valueProj)
     } else {

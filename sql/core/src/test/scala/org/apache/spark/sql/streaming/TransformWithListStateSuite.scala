@@ -296,13 +296,12 @@ class TransformWithListStateSuite extends StreamTest
         AddData(inputData, InputRow("k5", "append", "v4")),
         AddData(inputData, InputRow("k5", "put", "v5,v6")),
         AddData(inputData, InputRow("k5", "emitAllInState", "")),
-        CheckNewAnswer(("k5", "v5"), ("k5", "v6"))
-        // TODO: Uncomment once we have implemented ListStateMetrics for Avro encoding
-//        Execute { q =>
-//          assert(q.lastProgress.stateOperators(0).customMetrics.get("numListStateVars") > 0)
-//          assert(q.lastProgress.stateOperators(0).numRowsUpdated === 2)
-//          assert(q.lastProgress.stateOperators(0).numRowsRemoved === 2)
-//        }
+        CheckNewAnswer(("k5", "v5"), ("k5", "v6")),
+        Execute { q =>
+          assert(q.lastProgress.stateOperators(0).customMetrics.get("numListStateVars") > 0)
+          assert(q.lastProgress.stateOperators(0).numRowsUpdated === 2)
+          assert(q.lastProgress.stateOperators(0).numRowsRemoved === 2)
+        }
       )
     }
   }

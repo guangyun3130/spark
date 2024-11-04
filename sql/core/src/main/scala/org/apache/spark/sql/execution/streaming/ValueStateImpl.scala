@@ -31,6 +31,8 @@ import org.apache.spark.sql.streaming.ValueState
  * @param keyExprEnc - Spark SQL encoder for key
  * @param valEncoder - Spark SQL encoder for value
  * @param metrics - metrics to be updated as part of stateful processing
+ * @param avroEnc - optional Avro serializer and deserializer for this state variable that
+ *                is used by the StateStore to encode state in Avro format
  * @tparam S - data type of object that will be stored
  */
 class ValueStateImpl[S](

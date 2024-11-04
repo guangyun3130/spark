@@ -30,8 +30,18 @@ object StateStoreColumnFamilySchemaUtils {
     new StateStoreColumnFamilySchemaUtils(initializeAvroSerde)
 }
 
+/**
+ *
+ * @param initializeAvroSerde Whether or not to create the Avro serializers and deserializers
+ *                            for this state type. This class is used to create the
+ *                            StateStoreColumnFamilySchema for each state variable from the driver
+ */
 class StateStoreColumnFamilySchemaUtils(initializeAvroSerde: Boolean) {
 
+  /**
+   * If initializeAvroSerde is true, this method will create an Avro Serializer and Deserializer
+   * for a particular key and value schema.
+   */
   private def getAvroSerde(
       keySchema: StructType, valSchema: StructType): Option[AvroEncoderSpec] = {
     if (initializeAvroSerde) {
@@ -87,14 +97,12 @@ class StateStoreColumnFamilySchemaUtils(initializeAvroSerde: Boolean) {
       valEncoder: Encoder[V],
       hasTtl: Boolean): StateStoreColFamilySchema = {
     val compositeKeySchema = getCompositeKeySchema(keyEncoder.schema, userKeyEnc.schema)
-    val valSchema = getValueSchemaWithTTL(valEncoder.schema, hasTtl)
     StateStoreColFamilySchema(
       stateName,
       compositeKeySchema,
       getValueSchemaWithTTL(valEncoder.schema, hasTtl),
       Some(PrefixKeyScanStateEncoderSpec(compositeKeySchema, 1)),
-      Some(userKeyEnc.schema),
-      avroEnc = getAvroSerde(compositeKeySchema, valSchema))
+      Some(userKeyEnc.schema))
   }
 
   def getTimerStateSchema(
