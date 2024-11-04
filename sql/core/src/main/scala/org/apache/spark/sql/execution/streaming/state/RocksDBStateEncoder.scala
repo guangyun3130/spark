@@ -736,13 +736,7 @@ class NoPrefixKeyStateEncoder(
       // If avroEnc is defined, we know that we need to use Avro to
       // encode this UnsafeRow to Avro bytes
       val bytesToEncode = if (usingAvroEncoding) {
-        val avroData = avroEnc.get.keySerializer.serialize(row)
-        out.reset()
-        val encoder = EncoderFactory.get().directBinaryEncoder(out, null)
-        val writer = new GenericDatumWriter[Any](keyAvroType)
-        writer.write(avroData, encoder)
-        encoder.flush()
-        out.toByteArray
+        encodeUnsafeRow(row, avroEnc.get.keySerializer, keyAvroType, out)
       } else row.getBytes
       val (encodedBytes, startingOffset) = encodeColumnFamilyPrefix(
         bytesToEncode.length +
