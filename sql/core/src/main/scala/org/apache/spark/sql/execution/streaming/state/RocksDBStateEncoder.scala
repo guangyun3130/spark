@@ -822,7 +822,7 @@ class MultiValuedStateEncoder(
         encodedValue, Platform.BYTE_ARRAY_OFFSET, numBytes)
       if (avroEnc.isDefined) {
         decodeToUnsafeRow(
-          valueBytes, avroEnc.get.valueDeserializer, valueAvroType, valueProj)
+          encodedValue, avroEnc.get.valueDeserializer, valueAvroType, valueProj)
       } else {
         decodeToUnsafeRow(encodedValue, valueRow)
       }
@@ -853,7 +853,7 @@ class MultiValuedStateEncoder(
           pos += 1 // eat the delimiter character
           if (avroEnc.isDefined) {
             decodeToUnsafeRow(
-              valueBytes, avroEnc.get.valueDeserializer, valueAvroType, valueProj)
+              encodedValue, avroEnc.get.valueDeserializer, valueAvroType, valueProj)
           } else {
             decodeToUnsafeRow(encodedValue, valueRow)
           }
