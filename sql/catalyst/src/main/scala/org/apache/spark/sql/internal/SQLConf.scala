@@ -3343,6 +3343,17 @@ object SQLConf {
       .booleanConf
       .createWithDefault(false)
 
+  val ARROW_SAFE_TYPE_CASTING =
+    buildConf("spark.sql.execution.castArrowTableSafely")
+      .internal()
+      .doc("When true, Arrow will perform safe type conversion when casting Arrow tables to " +
+        "create DataFrames. Arrow will raise errors when detecting unsafe type conversion like " +
+        "overflow. When false, disabling Arrow's type check and do type conversions anyway. This " +
+        "config only works for Arrow 0.11.0+.")
+      .version("4.0.0")
+      .booleanConf
+      .createWithDefault(false)
+
   val PYSPARK_WORKER_PYTHON_EXECUTABLE =
     buildConf("spark.sql.execution.pyspark.python")
       .internal()
@@ -5959,6 +5970,8 @@ class SQLConf extends Serializable with Logging with SqlApiConf {
     getConf(SQLConf.PANDAS_GROUPED_MAP_ASSIGN_COLUMNS_BY_NAME)
 
   def arrowSafeTypeConversion: Boolean = getConf(SQLConf.PANDAS_ARROW_SAFE_TYPE_CONVERSION)
+
+  def arrowSafeTypeCasting: Boolean = getConf(SQLConf.ARROW_SAFE_TYPE_CASTING)
 
   def pysparkWorkerPythonExecutable: Option[String] =
     getConf(SQLConf.PYSPARK_WORKER_PYTHON_EXECUTABLE)
