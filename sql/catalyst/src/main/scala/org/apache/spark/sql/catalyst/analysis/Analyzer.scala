@@ -2216,14 +2216,14 @@ class Analyzer(override val catalogManager: CatalogManager) extends RuleExecutor
         numArgs: Int,
         u: UnresolvedFunction): Expression = {
       func match {
-        case owg: SupportsOrderingWithinGroup if u.isDistinct =>
+        case owg: InverseDistributionFunction if u.isDistinct =>
           throw QueryCompilationErrors.distinctInverseDistributionFunctionUnsupportedError(
             owg.prettyName)
-        case owg: SupportsOrderingWithinGroup
+        case owg: InverseDistributionFunction
           if !owg.orderingFilled && u.orderingWithinGroup.isEmpty =>
           throw QueryCompilationErrors.inverseDistributionFunctionMissingWithinGroupError(
             owg.prettyName)
-        case owg: SupportsOrderingWithinGroup
+        case owg: InverseDistributionFunction
           if owg.orderingFilled && u.orderingWithinGroup.nonEmpty =>
           throw QueryCompilationErrors.wrongNumOrderingsForInverseDistributionFunctionError(
             owg.prettyName, 0, u.orderingWithinGroup.length)
@@ -2231,6 +2231,10 @@ class Analyzer(override val catalogManager: CatalogManager) extends RuleExecutor
           if !f.isInstanceOf[SupportsOrderingWithinGroup] && u.orderingWithinGroup.nonEmpty =>
           throw QueryCompilationErrors.functionWithUnsupportedSyntaxError(
             func.prettyName, "WITHIN GROUP (ORDER BY ...)")
+        case listAgg: ListAgg
+          if u.isDistinct && !listAgg.isOrderCompatible(u.orderingWithinGroup) =>
+            throw QueryCompilationErrors.functionAndOrderExpressionMismatchError(
+              listAgg.prettyName, listAgg.child, u.orderingWithinGroup)
         // AggregateWindowFunctions are AggregateFunctions that can only be evaluated within
         // the context of a Window clause. They do not need to be wrapped in an
         // AggregateExpression.
