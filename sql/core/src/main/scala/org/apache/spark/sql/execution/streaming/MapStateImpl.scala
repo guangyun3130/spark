@@ -20,7 +20,7 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.execution.streaming.TransformWithStateKeyValueRowSchemaUtils._
-import org.apache.spark.sql.execution.streaming.state.{PrefixKeyScanStateEncoderSpec, StateStore, StateStoreErrors, UnsafeRowPair}
+import org.apache.spark.sql.execution.streaming.state.{AvroEncoderSpec, PrefixKeyScanStateEncoderSpec, StateStore, StateStoreErrors, UnsafeRowPair}
 import org.apache.spark.sql.streaming.MapState
 import org.apache.spark.sql.types.StructType
 
@@ -32,6 +32,8 @@ import org.apache.spark.sql.types.StructType
  * @param keyExprEnc - Spark SQL encoder for key
  * @param valEncoder - Spark SQL encoder for value
  * @param metrics - metrics to be updated as part of stateful processing
+ * @param avroEnc - optional Avro serializer and deserializer for this state variable that
+ *                is used by the StateStore to encode state in Avro format
  * @tparam K - type of key for map state variable
  * @tparam V - type of value for map state variable
  */
@@ -41,7 +43,8 @@ class MapStateImpl[K, V](
     keyExprEnc: ExpressionEncoder[Any],
     userKeyEnc: ExpressionEncoder[Any],
     valEncoder: ExpressionEncoder[Any],
-    metrics: Map[String, SQLMetric] = Map.empty) extends MapState[K, V] with Logging {
+    metrics: Map[String, SQLMetric] = Map.empty,
+    avroEnc: Option[AvroEncoderSpec] = None) extends MapState[K, V] with Logging {
 
   // Pack grouping key and user key together as a prefixed composite key
   private val schemaForCompositeKeyRow: StructType = {
@@ -52,7 +55,7 @@ class MapStateImpl[K, V](
     keyExprEnc, userKeyEnc, valEncoder, stateName)
 
   store.createColFamilyIfAbsent(stateName, schemaForCompositeKeyRow, schemaForValueRow,
-    PrefixKeyScanStateEncoderSpec(schemaForCompositeKeyRow, 1))
+    PrefixKeyScanStateEncoderSpec(schemaForCompositeKeyRow, 1), avroEncoderSpec = avroEnc)
 
   /** Whether state exists or not. */
   override def exists(): Boolean = {
