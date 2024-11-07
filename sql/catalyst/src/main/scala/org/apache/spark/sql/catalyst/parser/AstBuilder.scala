@@ -5926,10 +5926,11 @@ class AstBuilder extends DataTypeAstBuilder
   private def visitOperatorPipeAggregate(
       ctx: OperatorPipeRightSideContext, left: LogicalPlan): LogicalPlan = {
     assert(ctx.AGGREGATE != null)
+    def noAggregateOrGroupingExpressionsError(): Unit = operationNotAllowed(
+      "The AGGREGATE clause requires a list of aggregate expressions " +
+        "or a list of grouping expressions, or both", ctx)
     if (ctx.namedExpressionSeq() == null && ctx.aggregationClause() == null) {
-      operationNotAllowed(
-        "The AGGREGATE clause requires a list of aggregate expressions " +
-          "or a list of grouping expressions, or both", ctx)
+      noAggregateOrGroupingExpressionsError()
     }
     val aggregateExpressions: Seq[NamedExpression] =
       Option(ctx.namedExpressionSeq()).map { n: NamedExpressionSeqContext =>
@@ -5941,16 +5942,15 @@ class AstBuilder extends DataTypeAstBuilder
     Option(ctx.aggregationClause()).map { c: AggregationClauseContext =>
       withAggregationClause(c, aggregateExpressions, left, allowNamedGroupingExpressions = true)
       match {
+        case a @ Aggregate(Seq(key: UnresolvedAttribute), _, _, _) if key.equalsIgnoreCase("ALL") =>
+          if (a.aggregateExpressions.isEmpty) {
+            noAggregateOrGroupingExpressionsError()
+          }
+          a.copy(groupingExpressions = Seq(PipeGroupByAll()))
         case a: Aggregate =>
-          // GROUP BY ALL, GROUP BY CUBE, GROUPING_ID, GROUPING SETS, and GROUP BY ROLLUP are not
-          // supported yet.
+          // GROUP BY CUBE, GROUPING_ID, GROUPING SETS, and GROUP BY ROLLUP are not supported yet.
           def error(s: String): Unit =
             throw QueryParsingErrors.pipeOperatorAggregateUnsupportedCaseError(s, c)
-          a.groupingExpressions match {
-            case Seq(key: UnresolvedAttribute) if key.equalsIgnoreCase("ALL") =>
-              error("GROUP BY ALL")
-            case _ =>
-          }
           def visit(e: Expression): Unit = {
             e match {
               case _: Cube => error("GROUP BY CUBE")
