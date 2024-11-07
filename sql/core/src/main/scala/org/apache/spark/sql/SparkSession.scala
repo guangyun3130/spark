@@ -843,6 +843,7 @@ object SparkSession extends api.BaseSparkSessionCompanion with Logging {
     override def enableHiveSupport(): this.type = synchronized {
       if (hiveClassesArePresent) {
         super.enableHiveSupport()
+          .config(SQLConf.ARTIFACTS_SESSION_ISOLATION_ENABLED.key, false)
       } else {
         throw new IllegalArgumentException(
           "Unable to instantiate SparkSession with Hive support because " +
