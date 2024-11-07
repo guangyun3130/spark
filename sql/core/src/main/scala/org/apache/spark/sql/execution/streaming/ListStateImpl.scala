@@ -19,7 +19,7 @@ package org.apache.spark.sql.execution.streaming
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.execution.metric.SQLMetric
-import org.apache.spark.sql.execution.streaming.state.{NoPrefixKeyStateEncoderSpec, StateStore, StateStoreErrors}
+import org.apache.spark.sql.execution.streaming.state.{AvroEncoderSpec, NoPrefixKeyStateEncoderSpec, StateStore, StateStoreErrors}
 import org.apache.spark.sql.streaming.ListState
 import org.apache.spark.sql.types.StructType
 
@@ -32,6 +32,8 @@ import org.apache.spark.sql.types.StructType
  * @param keyExprEnc - Spark SQL encoder for key
  * @param valEncoder - Spark SQL encoder for value
  * @param metrics - metrics to be updated as part of stateful processing
+ * @param avroEnc - optional Avro serializer and deserializer for this state variable that
+ *                is used by the StateStore to encode state in Avro format
  * @tparam S - data type of object that will be stored in the list
  */
 class ListStateImpl[S](
@@ -39,7 +41,8 @@ class ListStateImpl[S](
      stateName: String,
      keyExprEnc: ExpressionEncoder[Any],
      valEncoder: ExpressionEncoder[Any],
-     metrics: Map[String, SQLMetric] = Map.empty)
+     metrics: Map[String, SQLMetric] = Map.empty,
+     avroEnc: Option[AvroEncoderSpec] = None)
   extends ListStateMetricsImpl
   with ListState[S]
   with Logging {
@@ -50,8 +53,13 @@ class ListStateImpl[S](
 
   private val stateTypesEncoder = StateTypesEncoder(keyExprEnc, valEncoder, stateName)
 
-  store.createColFamilyIfAbsent(stateName, keyExprEnc.schema, valEncoder.schema,
-    NoPrefixKeyStateEncoderSpec(keyExprEnc.schema), useMultipleValuesPerKey = true)
+  store.createColFamilyIfAbsent(
+    stateName,
+    keyExprEnc.schema,
+    valEncoder.schema,
+    NoPrefixKeyStateEncoderSpec(keyExprEnc.schema),
+    useMultipleValuesPerKey = true,
+    avroEncoderSpec = avroEnc)
 
   /** Whether state exists or not. */
    override def exists(): Boolean = {

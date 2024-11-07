@@ -91,7 +91,8 @@ case class CkptIdCollectingStateStoreWrapper(innerStore: StateStore) extends Sta
       valueSchema: StructType,
       keyStateEncoderSpec: KeyStateEncoderSpec,
       useMultipleValuesPerKey: Boolean = false,
-      isInternal: Boolean = false): Unit = {
+      isInternal: Boolean = false,
+      avroEnc: Option[AvroEncoderSpec]): Unit = {
     innerStore.createColFamilyIfAbsent(
       colFamilyName,
       keySchema,

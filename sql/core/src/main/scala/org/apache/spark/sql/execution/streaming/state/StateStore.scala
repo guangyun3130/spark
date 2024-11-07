@@ -41,6 +41,13 @@ import org.apache.spark.sql.execution.streaming.StatefulOperatorStateInfo
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.util.{NextIterator, ThreadUtils, Utils}
 
+sealed trait StateStoreEncoding
+
+object StateStoreEncoding {
+  case object UnsafeRow extends StateStoreEncoding
+  case object Avro extends StateStoreEncoding
+}
+
 /**
  * Base trait for a versioned key-value store which provides read operations. Each instance of a
  * `ReadStateStore` represents a specific version of state data, and such instances are created
@@ -126,7 +133,8 @@ trait StateStore extends ReadStateStore {
 
   /**
    * Create column family with given name, if absent.
-   *
+   * If Avro encoding is enabled for this query, we expect the avroEncoderSpec to
+   * be defined so that the Key and Value StateEncoders will use this.
    * @return column family ID
    */
   def createColFamilyIfAbsent(
@@ -135,7 +143,8 @@ trait StateStore extends ReadStateStore {
       valueSchema: StructType,
       keyStateEncoderSpec: KeyStateEncoderSpec,
       useMultipleValuesPerKey: Boolean = false,
-      isInternal: Boolean = false): Unit
+      isInternal: Boolean = false,
+      avroEncoderSpec: Option[AvroEncoderSpec] = None): Unit
 
   /**
    * Put a new non-null value for a non-null key. Implementations must be aware that the UnsafeRows

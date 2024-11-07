@@ -19,7 +19,7 @@ package org.apache.spark.sql.execution.streaming
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.execution.metric.SQLMetric
-import org.apache.spark.sql.execution.streaming.state.{NoPrefixKeyStateEncoderSpec, StateStore}
+import org.apache.spark.sql.execution.streaming.state.{AvroEncoderSpec, NoPrefixKeyStateEncoderSpec, StateStore}
 import org.apache.spark.sql.streaming.ValueState
 
 /**
@@ -30,6 +30,8 @@ import org.apache.spark.sql.streaming.ValueState
  * @param keyExprEnc - Spark SQL encoder for key
  * @param valEncoder - Spark SQL encoder for value
  * @param metrics - metrics to be updated as part of stateful processing
+ * @param avroEnc - optional Avro serializer and deserializer for this state variable that
+ *                is used by the StateStore to encode state in Avro format
  * @tparam S - data type of object that will be stored
  */
 class ValueStateImpl[S](
@@ -37,7 +39,8 @@ class ValueStateImpl[S](
     stateName: String,
     keyExprEnc: ExpressionEncoder[Any],
     valEncoder: ExpressionEncoder[Any],
-    metrics: Map[String, SQLMetric] = Map.empty)
+    metrics: Map[String, SQLMetric] = Map.empty,
+    avroEnc: Option[AvroEncoderSpec] = None)
   extends ValueState[S] with Logging {
 
   private val stateTypesEncoder = StateTypesEncoder(keyExprEnc, valEncoder, stateName)
@@ -46,7 +49,7 @@ class ValueStateImpl[S](
 
   private def initialize(): Unit = {
     store.createColFamilyIfAbsent(stateName, keyExprEnc.schema, valEncoder.schema,
-      NoPrefixKeyStateEncoderSpec(keyExprEnc.schema))
+      NoPrefixKeyStateEncoderSpec(keyExprEnc.schema), avroEncoderSpec = avroEnc)
   }
 
   /** Function to check if state exists. Returns true if present and false otherwise */

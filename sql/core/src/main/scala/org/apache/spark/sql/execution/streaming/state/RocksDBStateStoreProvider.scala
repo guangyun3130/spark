@@ -71,13 +71,14 @@ private[sql] class RocksDBStateStoreProvider
         valueSchema: StructType,
         keyStateEncoderSpec: KeyStateEncoderSpec,
         useMultipleValuesPerKey: Boolean = false,
-        isInternal: Boolean = false): Unit = {
+        isInternal: Boolean = false,
+        avroEnc: Option[AvroEncoderSpec]): Unit = {
       verifyColFamilyCreationOrDeletion("create_col_family", colFamilyName, isInternal)
       val newColFamilyId = rocksDB.createColFamilyIfAbsent(colFamilyName)
       keyValueEncoderMap.putIfAbsent(colFamilyName,
         (RocksDBStateEncoder.getKeyEncoder(keyStateEncoderSpec, useColumnFamilies,
-          Some(newColFamilyId)), RocksDBStateEncoder.getValueEncoder(valueSchema,
-          useMultipleValuesPerKey)))
+          Some(newColFamilyId), avroEnc), RocksDBStateEncoder.getValueEncoder(valueSchema,
+          useMultipleValuesPerKey, avroEnc)))
     }
 
     override def get(key: UnsafeRow, colFamilyName: String): UnsafeRow = {

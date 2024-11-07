@@ -17,13 +17,21 @@
 
 package org.apache.spark.sql.execution.streaming.state
 
+import java.io.ByteArrayOutputStream
 import java.lang.Double.{doubleToRawLongBits, longBitsToDouble}
 import java.lang.Float.{floatToRawIntBits, intBitsToFloat}
 import java.nio.{ByteBuffer, ByteOrder}
 
+import org.apache.avro.Schema
+import org.apache.avro.generic.{GenericDatumReader, GenericDatumWriter}
+import org.apache.avro.io.{DecoderFactory, EncoderFactory}
+
 import org.apache.spark.internal.Logging
+import org.apache.spark.sql.avro.{AvroDeserializer, AvroSerializer, SchemaConverters}
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{BoundReference, JoinedRow, UnsafeProjection, UnsafeRow}
 import org.apache.spark.sql.catalyst.expressions.codegen.UnsafeRowWriter
+import org.apache.spark.sql.execution.streaming.StateStoreColumnFamilySchemaUtils
 import org.apache.spark.sql.execution.streaming.state.RocksDBStateStoreProvider.{STATE_ENCODING_NUM_VERSION_BYTES, STATE_ENCODING_VERSION, VIRTUAL_COL_FAMILY_PREFIX_BYTES}
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.Platform
@@ -49,6 +57,7 @@ abstract class RocksDBKeyStateEncoderBase(
   def offsetForColFamilyPrefix: Int =
     if (useColumnFamilies) VIRTUAL_COL_FAMILY_PREFIX_BYTES else 0
 
+  val out = new ByteArrayOutputStream
   /**
    * Get Byte Array for the virtual column family id that is used as prefix for
    * key state rows.
@@ -93,19 +102,20 @@ object RocksDBStateEncoder {
   def getKeyEncoder(
       keyStateEncoderSpec: KeyStateEncoderSpec,
       useColumnFamilies: Boolean,
-      virtualColFamilyId: Option[Short] = None): RocksDBKeyStateEncoder = {
+      virtualColFamilyId: Option[Short] = None,
+      avroEnc: Option[AvroEncoderSpec] = None): RocksDBKeyStateEncoder = {
     // Return the key state encoder based on the requested type
     keyStateEncoderSpec match {
       case NoPrefixKeyStateEncoderSpec(keySchema) =>
-        new NoPrefixKeyStateEncoder(keySchema, useColumnFamilies, virtualColFamilyId)
+        new NoPrefixKeyStateEncoder(keySchema, useColumnFamilies, virtualColFamilyId, avroEnc)
 
       case PrefixKeyScanStateEncoderSpec(keySchema, numColsPrefixKey) =>
         new PrefixKeyScanStateEncoder(keySchema, numColsPrefixKey,
-          useColumnFamilies, virtualColFamilyId)
+          useColumnFamilies, virtualColFamilyId, avroEnc)
 
       case RangeKeyScanStateEncoderSpec(keySchema, orderingOrdinals) =>
         new RangeKeyScanStateEncoder(keySchema, orderingOrdinals,
-          useColumnFamilies, virtualColFamilyId)
+          useColumnFamilies, virtualColFamilyId, avroEnc)
 
       case _ =>
         throw new IllegalArgumentException(s"Unsupported key state encoder spec: " +
@@ -115,11 +125,12 @@ object RocksDBStateEncoder {
 
   def getValueEncoder(
       valueSchema: StructType,
-      useMultipleValuesPerKey: Boolean): RocksDBValueStateEncoder = {
+      useMultipleValuesPerKey: Boolean,
+      avroEnc: Option[AvroEncoderSpec] = None): RocksDBValueStateEncoder = {
     if (useMultipleValuesPerKey) {
-      new MultiValuedStateEncoder(valueSchema)
+      new MultiValuedStateEncoder(valueSchema, avroEnc)
     } else {
-      new SingleValueStateEncoder(valueSchema)
+      new SingleValueStateEncoder(valueSchema, avroEnc)
     }
   }
 
@@ -145,6 +156,26 @@ object RocksDBStateEncoder {
     encodedBytes
   }
 
+  /**
+   * This method takes an UnsafeRow, and serializes to a byte array using Avro encoding.
+   */
+  def encodeUnsafeRow(
+     row: UnsafeRow,
+     avroSerializer: AvroSerializer,
+     valueAvroType: Schema,
+     out: ByteArrayOutputStream): Array[Byte] = {
+    // InternalRow -> Avro.GenericDataRecord
+    val avroData =
+      avroSerializer.serialize(row)
+    out.reset()
+    val encoder = EncoderFactory.get().directBinaryEncoder(out, null)
+    val writer = new GenericDatumWriter[Any](
+      valueAvroType) // Defining Avro writer for this struct type
+    writer.write(avroData, encoder) // Avro.GenericDataRecord -> byte array
+    encoder.flush()
+    out.toByteArray
+  }
+
   def decodeToUnsafeRow(bytes: Array[Byte], numFields: Int): UnsafeRow = {
     if (bytes != null) {
       val row = new UnsafeRow(numFields)
@@ -152,6 +183,26 @@ object RocksDBStateEncoder {
     } else {
       null
     }
+  }
+
+  /**
+   * This method takes a byte array written using Avro encoding, and
+   * deserializes to an UnsafeRow using the Avro deserializer
+   */
+  def decodeToUnsafeRow(
+      valueBytes: Array[Byte],
+      avroDeserializer: AvroDeserializer,
+      valueAvroType: Schema,
+      valueProj: UnsafeProjection): UnsafeRow = {
+    val reader = new GenericDatumReader[Any](valueAvroType)
+    val decoder = DecoderFactory.get().binaryDecoder(valueBytes, 0, valueBytes.length, null)
+    // bytes -> Avro.GenericDataRecord
+    val genericData = reader.read(null, decoder)
+    // Avro.GenericDataRecord -> InternalRow
+    val internalRow = avroDeserializer.deserialize(
+      genericData).orNull.asInstanceOf[InternalRow]
+    // InternalRow -> UnsafeRow
+    valueProj.apply(internalRow)
   }
 
   def decodeToUnsafeRow(bytes: Array[Byte], reusedRow: UnsafeRow): UnsafeRow = {
@@ -174,16 +225,20 @@ object RocksDBStateEncoder {
  * @param keySchema - schema of the key to be encoded
  * @param numColsPrefixKey - number of columns to be used for prefix key
  * @param useColumnFamilies - if column family is enabled for this encoder
+ * @param avroEnc - if Avro encoding is specified for this StateEncoder, this encoder will
+ *                be defined
  */
 class PrefixKeyScanStateEncoder(
     keySchema: StructType,
     numColsPrefixKey: Int,
     useColumnFamilies: Boolean = false,
-    virtualColFamilyId: Option[Short] = None)
+    virtualColFamilyId: Option[Short] = None,
+    avroEnc: Option[AvroEncoderSpec] = None)
   extends RocksDBKeyStateEncoderBase(useColumnFamilies, virtualColFamilyId) {
 
   import RocksDBStateEncoder._
 
+  private val usingAvroEncoding = avroEnc.isDefined
   private val prefixKeyFieldsWithIdx: Seq[(StructField, Int)] = {
     keySchema.zipWithIndex.take(numColsPrefixKey)
   }
@@ -203,6 +258,18 @@ class PrefixKeyScanStateEncoder(
     UnsafeProjection.create(refs)
   }
 
+  // Prefix Key schema and projection definitions used by the Avro Serializers
+  // and Deserializers
+  private val prefixKeySchema = StructType(keySchema.take(numColsPrefixKey))
+  private val prefixKeyAvroType = SchemaConverters.toAvroType(prefixKeySchema)
+  private val prefixKeyProj = UnsafeProjection.create(prefixKeySchema)
+
+  // Remaining Key schema and projection definitions used by the Avro Serializers
+  // and Deserializers
+  private val remainingKeySchema = StructType(keySchema.drop(numColsPrefixKey))
+  private val remainingKeyAvroType = SchemaConverters.toAvroType(remainingKeySchema)
+  private val remainingKeyProj = UnsafeProjection.create(remainingKeySchema)
+
   // This is quite simple to do - just bind sequentially, as we don't change the order.
   private val restoreKeyProjection: UnsafeProjection = UnsafeProjection.create(keySchema)
 
@@ -210,9 +277,24 @@ class PrefixKeyScanStateEncoder(
   private val joinedRowOnKey = new JoinedRow()
 
   override def encodeKey(row: UnsafeRow): Array[Byte] = {
-    val prefixKeyEncoded = encodeUnsafeRow(extractPrefixKey(row))
-    val remainingEncoded = encodeUnsafeRow(remainingKeyProjection(row))
-
+    val (prefixKeyEncoded, remainingEncoded) = if (usingAvroEncoding) {
+      (
+        encodeUnsafeRow(
+          extractPrefixKey(row),
+          avroEnc.get.keySerializer,
+          prefixKeyAvroType,
+          out
+        ),
+        encodeUnsafeRow(
+          remainingKeyProjection(row),
+          avroEnc.get.suffixKeySerializer.get,
+          remainingKeyAvroType,
+          out
+        )
+      )
+    } else {
+      (encodeUnsafeRow(extractPrefixKey(row)), encodeUnsafeRow(remainingKeyProjection(row)))
+    }
     val (encodedBytes, startingOffset) = encodeColumnFamilyPrefix(
       prefixKeyEncoded.length + remainingEncoded.length + 4
     )
@@ -243,9 +325,25 @@ class PrefixKeyScanStateEncoder(
     Platform.copyMemory(keyBytes, decodeKeyStartOffset + 4 + prefixKeyEncodedLen,
       remainingKeyEncoded, Platform.BYTE_ARRAY_OFFSET, remainingKeyEncodedLen)
 
-    val prefixKeyDecoded = decodeToUnsafeRow(prefixKeyEncoded, numFields = numColsPrefixKey)
-    val remainingKeyDecoded = decodeToUnsafeRow(remainingKeyEncoded,
-      numFields = keySchema.length - numColsPrefixKey)
+    val (prefixKeyDecoded, remainingKeyDecoded) = if (usingAvroEncoding) {
+      (
+        decodeToUnsafeRow(
+          prefixKeyEncoded,
+          avroEnc.get.keyDeserializer,
+          prefixKeyAvroType,
+          prefixKeyProj
+        ),
+        decodeToUnsafeRow(
+          remainingKeyEncoded,
+          avroEnc.get.suffixKeyDeserializer.get,
+          remainingKeyAvroType,
+          remainingKeyProj
+        )
+      )
+    } else {
+      (decodeToUnsafeRow(prefixKeyEncoded, numFields = numColsPrefixKey),
+        decodeToUnsafeRow(remainingKeyEncoded, numFields = keySchema.length - numColsPrefixKey))
+    }
 
     restoreKeyProjection(joinedRowOnKey.withLeft(prefixKeyDecoded).withRight(remainingKeyDecoded))
   }
@@ -255,7 +353,11 @@ class PrefixKeyScanStateEncoder(
   }
 
   override def encodePrefixKey(prefixKey: UnsafeRow): Array[Byte] = {
-    val prefixKeyEncoded = encodeUnsafeRow(prefixKey)
+    val prefixKeyEncoded = if (usingAvroEncoding) {
+      encodeUnsafeRow(prefixKey, avroEnc.get.keySerializer, prefixKeyAvroType, out)
+    } else {
+      encodeUnsafeRow(prefixKey)
+    }
     val (prefix, startingOffset) = encodeColumnFamilyPrefix(
       prefixKeyEncoded.length + 4
     )
@@ -299,13 +401,16 @@ class PrefixKeyScanStateEncoder(
  * @param keySchema - schema of the key to be encoded
  * @param orderingOrdinals - the ordinals for which the range scan is constructed
  * @param useColumnFamilies - if column family is enabled for this encoder
+ * @param avroEnc - if Avro encoding is specified for this StateEncoder, this encoder will
+ *                be defined
  */
 class RangeKeyScanStateEncoder(
     keySchema: StructType,
     orderingOrdinals: Seq[Int],
     useColumnFamilies: Boolean = false,
-    virtualColFamilyId: Option[Short] = None)
-  extends RocksDBKeyStateEncoderBase(useColumnFamilies, virtualColFamilyId) {
+    virtualColFamilyId: Option[Short] = None,
+    avroEnc: Option[AvroEncoderSpec] = None)
+  extends RocksDBKeyStateEncoderBase(useColumnFamilies, virtualColFamilyId) with Logging {
 
   import RocksDBStateEncoder._
 
@@ -373,6 +478,22 @@ class RangeKeyScanStateEncoder(
     }
     UnsafeProjection.create(refs)
   }
+
+  private val rangeScanAvroSchema = StateStoreColumnFamilySchemaUtils.convertForRangeScan(
+    StructType(rangeScanKeyFieldsWithOrdinal.map(_._1).toArray))
+
+  private val rangeScanAvroType = SchemaConverters.toAvroType(rangeScanAvroSchema)
+
+  private val rangeScanAvroProjection = UnsafeProjection.create(rangeScanAvroSchema)
+
+  // Existing remainder key schema stuff
+  private val remainingKeySchema = StructType(
+    0.to(keySchema.length - 1).diff(orderingOrdinals).map(keySchema(_))
+  )
+
+  private val remainingKeyAvroType = SchemaConverters.toAvroType(remainingKeySchema)
+
+  private val remainingKeyAvroProjection = UnsafeProjection.create(remainingKeySchema)
 
   // Reusable objects
   private val joinedRowOnKey = new JoinedRow()
@@ -566,10 +687,28 @@ class RangeKeyScanStateEncoder(
   override def encodeKey(row: UnsafeRow): Array[Byte] = {
     // This prefix key has the columns specified by orderingOrdinals
     val prefixKey = extractPrefixKey(row)
-    val rangeScanKeyEncoded = encodeUnsafeRow(encodePrefixKeyForRangeScan(prefixKey))
+    val rangeScanKeyEncoded = if (avroEnc.isDefined) {
+      encodeUnsafeRow(
+        encodePrefixKeyForRangeScan(prefixKey),
+        avroEnc.get.keySerializer,
+        rangeScanAvroType,
+        out
+      )
+    } else {
+      encodeUnsafeRow(encodePrefixKeyForRangeScan(prefixKey))
+    }
 
     val result = if (orderingOrdinals.length < keySchema.length) {
-      val remainingEncoded = encodeUnsafeRow(remainingKeyProjection(row))
+      val remainingEncoded = if (avroEnc.isDefined) {
+        encodeUnsafeRow(
+          remainingKeyProjection(row),
+          avroEnc.get.suffixKeySerializer.get,
+          remainingKeyAvroType,
+          out
+        )
+      } else {
+        encodeUnsafeRow(remainingKeyProjection(row))
+      }
       val (encodedBytes, startingOffset) = encodeColumnFamilyPrefix(
         rangeScanKeyEncoded.length + remainingEncoded.length + 4
       )
@@ -606,8 +745,13 @@ class RangeKeyScanStateEncoder(
     Platform.copyMemory(keyBytes, decodeKeyStartOffset + 4,
       prefixKeyEncoded, Platform.BYTE_ARRAY_OFFSET, prefixKeyEncodedLen)
 
-    val prefixKeyDecodedForRangeScan = decodeToUnsafeRow(prefixKeyEncoded,
-      numFields = orderingOrdinals.length)
+    val prefixKeyDecodedForRangeScan = if (avroEnc.isDefined) {
+      decodeToUnsafeRow(prefixKeyEncoded, avroEnc.get.keyDeserializer,
+        rangeScanAvroType, rangeScanAvroProjection)
+    } else {
+      decodeToUnsafeRow(prefixKeyEncoded,
+        numFields = orderingOrdinals.length)
+    }
     val prefixKeyDecoded = decodePrefixKeyForRangeScan(prefixKeyDecodedForRangeScan)
 
     if (orderingOrdinals.length < keySchema.length) {
@@ -620,8 +764,14 @@ class RangeKeyScanStateEncoder(
         remainingKeyEncoded, Platform.BYTE_ARRAY_OFFSET,
         remainingKeyEncodedLen)
 
-      val remainingKeyDecoded = decodeToUnsafeRow(remainingKeyEncoded,
-        numFields = keySchema.length - orderingOrdinals.length)
+      val remainingKeyDecoded = if (avroEnc.isDefined) {
+        decodeToUnsafeRow(remainingKeyEncoded,
+          avroEnc.get.suffixKeyDeserializer.get,
+          remainingKeyAvroType, remainingKeyAvroProjection)
+      } else {
+        decodeToUnsafeRow(remainingKeyEncoded,
+          numFields = keySchema.length - orderingOrdinals.length)
+      }
 
       val joined = joinedRowOnKey.withLeft(prefixKeyDecoded).withRight(remainingKeyDecoded)
       val restored = restoreKeyProjection(joined)
@@ -634,7 +784,16 @@ class RangeKeyScanStateEncoder(
   }
 
   override def encodePrefixKey(prefixKey: UnsafeRow): Array[Byte] = {
-    val rangeScanKeyEncoded = encodeUnsafeRow(encodePrefixKeyForRangeScan(prefixKey))
+    val rangeScanKeyEncoded = if (avroEnc.isDefined) {
+      encodeUnsafeRow(
+        encodePrefixKeyForRangeScan(prefixKey),
+        avroEnc.get.keySerializer,
+        rangeScanAvroType,
+        out
+      )
+    } else {
+      encodeUnsafeRow(encodePrefixKeyForRangeScan(prefixKey))
+    }
     val (prefix, startingOffset) = encodeColumnFamilyPrefix(rangeScanKeyEncoded.length + 4)
 
     Platform.putInt(prefix, startingOffset, rangeScanKeyEncoded.length)
@@ -657,23 +816,32 @@ class RangeKeyScanStateEncoder(
  *    The bytes of a UnsafeRow is written unmodified to starting from offset 1
  *    (offset 0 is the version byte of value 0). That is, if the unsafe row has N bytes,
  *    then the generated array byte will be N+1 bytes.
+ * If the avroEnc is specified, we are using Avro encoding for this column family's keys
  */
 class NoPrefixKeyStateEncoder(
     keySchema: StructType,
     useColumnFamilies: Boolean = false,
-    virtualColFamilyId: Option[Short] = None)
-  extends RocksDBKeyStateEncoderBase(useColumnFamilies, virtualColFamilyId) {
+    virtualColFamilyId: Option[Short] = None,
+    avroEnc: Option[AvroEncoderSpec] = None)
+  extends RocksDBKeyStateEncoderBase(useColumnFamilies, virtualColFamilyId) with Logging {
 
   import RocksDBStateEncoder._
 
   // Reusable objects
+  private val usingAvroEncoding = avroEnc.isDefined
   private val keyRow = new UnsafeRow(keySchema.size)
+  private val keyAvroType = SchemaConverters.toAvroType(keySchema)
+  private val keyProj = UnsafeProjection.create(keySchema)
 
   override def encodeKey(row: UnsafeRow): Array[Byte] = {
     if (!useColumnFamilies) {
       encodeUnsafeRow(row)
     } else {
-      val bytesToEncode = row.getBytes
+      // If avroEnc is defined, we know that we need to use Avro to
+      // encode this UnsafeRow to Avro bytes
+      val bytesToEncode = if (usingAvroEncoding) {
+        encodeUnsafeRow(row, avroEnc.get.keySerializer, keyAvroType, out)
+      } else row.getBytes
       val (encodedBytes, startingOffset) = encodeColumnFamilyPrefix(
         bytesToEncode.length +
           STATE_ENCODING_NUM_VERSION_BYTES
@@ -697,11 +865,25 @@ class NoPrefixKeyStateEncoder(
     if (useColumnFamilies) {
       if (keyBytes != null) {
         // Platform.BYTE_ARRAY_OFFSET is the recommended way refer to the 1st offset. See Platform.
-        keyRow.pointTo(
-          keyBytes,
-          decodeKeyStartOffset + STATE_ENCODING_NUM_VERSION_BYTES,
-          keyBytes.length - STATE_ENCODING_NUM_VERSION_BYTES - VIRTUAL_COL_FAMILY_PREFIX_BYTES)
-        keyRow
+        if (usingAvroEncoding) {
+          val avroBytes = new Array[Byte](
+            keyBytes.length - STATE_ENCODING_NUM_VERSION_BYTES - VIRTUAL_COL_FAMILY_PREFIX_BYTES)
+          System.arraycopy(
+            keyBytes,
+            decodeKeyStartOffset + STATE_ENCODING_NUM_VERSION_BYTES,
+            avroBytes,
+            0,
+            avroBytes.length
+          )
+          decodeToUnsafeRow(
+            keyBytes, avroEnc.get.keyDeserializer, keyAvroType, keyProj)
+        } else {
+          keyRow.pointTo(
+            keyBytes,
+            decodeKeyStartOffset + STATE_ENCODING_NUM_VERSION_BYTES,
+            keyBytes.length - STATE_ENCODING_NUM_VERSION_BYTES - VIRTUAL_COL_FAMILY_PREFIX_BYTES)
+          keyRow
+        }
       } else {
         null
       }
@@ -727,17 +909,28 @@ class NoPrefixKeyStateEncoder(
  * This encoder supports RocksDB StringAppendOperator merge operator. Values encoded can be
  * merged in RocksDB using merge operation, and all merged values can be read using decodeValues
  * operation.
+ * If the avroEnc is specified, we are using Avro encoding for this column family's values
  */
-class MultiValuedStateEncoder(valueSchema: StructType)
+class MultiValuedStateEncoder(
+    valueSchema: StructType,
+    avroEnc: Option[AvroEncoderSpec] = None)
   extends RocksDBValueStateEncoder with Logging {
 
   import RocksDBStateEncoder._
 
+  private val usingAvroEncoding = avroEnc.isDefined
   // Reusable objects
+  private val out = new ByteArrayOutputStream
   private val valueRow = new UnsafeRow(valueSchema.size)
+  private val valueAvroType = SchemaConverters.toAvroType(valueSchema)
+  private val valueProj = UnsafeProjection.create(valueSchema)
 
   override def encodeValue(row: UnsafeRow): Array[Byte] = {
-    val bytes = encodeUnsafeRow(row)
+    val bytes = if (usingAvroEncoding) {
+      encodeUnsafeRow(row, avroEnc.get.valueSerializer, valueAvroType, out)
+    } else {
+      encodeUnsafeRow(row)
+    }
     val numBytes = bytes.length
 
     val encodedBytes = new Array[Byte](java.lang.Integer.BYTES + bytes.length)
@@ -756,7 +949,12 @@ class MultiValuedStateEncoder(valueSchema: StructType)
       val encodedValue = new Array[Byte](numBytes)
       Platform.copyMemory(valueBytes, java.lang.Integer.BYTES + Platform.BYTE_ARRAY_OFFSET,
         encodedValue, Platform.BYTE_ARRAY_OFFSET, numBytes)
-      decodeToUnsafeRow(encodedValue, valueRow)
+      if (usingAvroEncoding) {
+        decodeToUnsafeRow(
+          encodedValue, avroEnc.get.valueDeserializer, valueAvroType, valueProj)
+      } else {
+        decodeToUnsafeRow(encodedValue, valueRow)
+      }
     }
   }
 
@@ -782,7 +980,12 @@ class MultiValuedStateEncoder(valueSchema: StructType)
 
           pos += numBytes
           pos += 1 // eat the delimiter character
-          decodeToUnsafeRow(encodedValue, valueRow)
+          if (usingAvroEncoding) {
+            decodeToUnsafeRow(
+              encodedValue, avroEnc.get.valueDeserializer, valueAvroType, valueProj)
+          } else {
+            decodeToUnsafeRow(encodedValue, valueRow)
+          }
         }
       }
     }
@@ -802,16 +1005,29 @@ class MultiValuedStateEncoder(valueSchema: StructType)
  *    The bytes of a UnsafeRow is written unmodified to starting from offset 1
  *    (offset 0 is the version byte of value 0). That is, if the unsafe row has N bytes,
  *    then the generated array byte will be N+1 bytes.
+ * If the avroEnc is specified, we are using Avro encoding for this column family's values
  */
-class SingleValueStateEncoder(valueSchema: StructType)
-  extends RocksDBValueStateEncoder {
+class SingleValueStateEncoder(
+    valueSchema: StructType,
+    avroEnc: Option[AvroEncoderSpec] = None)
+  extends RocksDBValueStateEncoder with Logging {
 
   import RocksDBStateEncoder._
 
+  private val usingAvroEncoding = avroEnc.isDefined
   // Reusable objects
+  private val out = new ByteArrayOutputStream
   private val valueRow = new UnsafeRow(valueSchema.size)
+  private val valueAvroType = SchemaConverters.toAvroType(valueSchema)
+  private val valueProj = UnsafeProjection.create(valueSchema)
 
-  override def encodeValue(row: UnsafeRow): Array[Byte] = encodeUnsafeRow(row)
+  override def encodeValue(row: UnsafeRow): Array[Byte] = {
+    if (usingAvroEncoding) {
+      encodeUnsafeRow(row, avroEnc.get.valueSerializer, valueAvroType, out)
+    } else {
+      encodeUnsafeRow(row)
+    }
+  }
 
   /**
    * Decode byte array for a value to a UnsafeRow.
@@ -820,7 +1036,15 @@ class SingleValueStateEncoder(valueSchema: StructType)
    *       the given byte array.
    */
   override def decodeValue(valueBytes: Array[Byte]): UnsafeRow = {
-    decodeToUnsafeRow(valueBytes, valueRow)
+    if (valueBytes == null) {
+      return null
+    }
+    if (usingAvroEncoding) {
+      decodeToUnsafeRow(
+        valueBytes, avroEnc.get.valueDeserializer, valueAvroType, valueProj)
+    } else {
+      decodeToUnsafeRow(valueBytes, valueRow)
+    }
   }
 
   override def supportsMultipleValuesPerKey: Boolean = false
