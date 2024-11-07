@@ -146,4 +146,77 @@ class MsSqlServerIntegrationSuite extends DockerJDBCIntegrationV2Suite with V2JD
         |""".stripMargin)
     assert(df.collect().length == 2)
   }
+
+  test("SPARK-50087: SqlServer handle booleans in IF in SELECT test") {
+    // This doesn't compile on SqlServer unless result boolean expressions
+    // in IF / CASE WHEN are wrapped with an IIF(<>, 1, 0).
+    val df = sql(
+      s"""|WITH dummy AS (
+          |  SELECT
+          |    DISTINCT name AS full_name,
+          |    UPPER(name) AS test_type,
+          |    name,
+          |    IF(
+          |      LOWER(name) = 'legolas' OR LOWER(name) = 'elrond',
+          |      'Elf',
+          |      IF(
+          |        LOWER(name) = 'gimli' OR LOWER(name) = 'thorin',
+          |        'Dwarf',
+          |        IF(
+          |          LOWER(name) = 'gandalf' OR LOWER(name) = 'radagast',
+          |          'Wizard',
+          |          LOWER(name)
+          |        )
+          |      )
+          |    ) AS test_type_name
+          |  FROM $catalogName.employee
+          |),
+          |dummy_new AS (
+          |  SELECT *
+          |  FROM dummy WHERE test_type_name = 'Wizard'
+          |)
+          |SELECT * FROM dummy_new limit 1""".stripMargin
+    )
+    df.collect()
+  }
+
+  test("SPARK-50087: SqlServer handle booleans in CASE WHEN test") {
+    val df = sql(
+      s"""|SELECT * FROM $catalogName.employee
+          |WHERE CASE WHEN name = 'Legolas' THEN name = 'Elf' ELSE NOT (name = 'Wizard') END
+          |""".stripMargin
+    )
+    df.collect()
+  }
+
+  test("SPARK-50087: SqlServer handle booleans in CASE WHEN with always true test") {
+    val df = sql(
+      s"""|SELECT * FROM $catalogName.employee
+          |WHERE CASE WHEN (name = 'Legolas') THEN (name = 'Elf') ELSE (1=1) END
+          |""".stripMargin
+    )
+    df.collect()
+  }
+
+  test("SPARK-50087: SqlServer handle booleans in nested CASE WHEN test") {
+    val df = sql(
+      s"""|SELECT * FROM $catalogName.employee
+          |WHERE CASE WHEN (name = 'Legolas') THEN
+          | CASE WHEN (name = 'Elf') THEN (name = 'Elrond') ELSE (name = 'Gandalf') END
+          | ELSE (name = 'Sauron') END
+          |""".stripMargin
+    )
+    df.collect()
+  }
+
+  test("SPARK-50087: SqlServer handle non-booleans in nested CASE WHEN test") {
+    val df = sql(
+      s"""|SELECT * FROM $catalogName.employee
+          |WHERE CASE WHEN (name = 'Legolas') THEN
+          | CASE WHEN (name = 'Elf') THEN 'Elf' ELSE 'Wizard' END
+          | ELSE 'Sauron' END
+          |""".stripMargin
+    )
+    df.collect()
+  }
 }
