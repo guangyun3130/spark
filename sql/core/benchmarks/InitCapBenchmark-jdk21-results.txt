@@ -1,0 +1,64 @@
+================================================================================================
+[wc=10000000, wl=1, capitalized=true]
+================================================================================================
+
+OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.8.0-1016-aws
+Intel(R) Xeon(R) CPU E5-2686 v4 @ 2.30GHz
+InitCap evaluation [wc=10000000, wl=1, capitalized=true]:  Best Time(ms)   Avg Time(ms)   Stdev(ms)    Rate(M/s)   Per Row(ns)   Relative
+----------------------------------------------------------------------------------------------------------------------------------------
+execICU[collationName=he_ISR]                                      1404           1405           2         59.7          16.7       1.0X
+execICU[collationName=UNICODE]                                     1427           1429           2         58.8          17.0       1.0X
+execICU[collationName=UNICODE_CI]                                  1416           1459          61         59.2          16.9       1.0X
+execBinaryICU                                                       766            767           1        109.5           9.1       1.8X
+execBinary                                                          156            157           1        539.1           1.9       9.0X
+execLowercase                                                      1401           1449          68         59.9          16.7       1.0X
+
+
+================================================================================================
+[wc=10000000, wl=1, capitalized=false]
+================================================================================================
+
+OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.8.0-1016-aws
+Intel(R) Xeon(R) CPU E5-2686 v4 @ 2.30GHz
+InitCap evaluation [wc=10000000, wl=1, capitalized=false]:  Best Time(ms)   Avg Time(ms)   Stdev(ms)    Rate(M/s)   Per Row(ns)   Relative
+-----------------------------------------------------------------------------------------------------------------------------------------
+execICU[collationName=he_ISR]                                       1471           1476           8         57.0          17.5       1.0X
+execICU[collationName=UNICODE]                                      1456           1503          66         57.6          17.4       1.0X
+execICU[collationName=UNICODE_CI]                                   1491           1535          62         56.3          17.8       1.0X
+execBinaryICU                                                        747            754           7        112.3           8.9       2.0X
+execBinary                                                           153            156           2        549.0           1.8       9.6X
+execLowercase                                                       1494           1514          28         56.1          17.8       1.0X
+
+
+================================================================================================
+[wc=10000000, wl=16, capitalized=true]
+================================================================================================
+
+OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.8.0-1016-aws
+Intel(R) Xeon(R) CPU E5-2686 v4 @ 2.30GHz
+InitCap evaluation [wc=10000000, wl=16, capitalized=true]:  Best Time(ms)   Avg Time(ms)   Stdev(ms)    Rate(M/s)   Per Row(ns)   Relative
+-----------------------------------------------------------------------------------------------------------------------------------------
+execICU[collationName=he_ISR]                                       4314           4317           4         19.4          51.4       1.0X
+execICU[collationName=UNICODE]                                      4248           4277          40         19.7          50.6       1.0X
+execICU[collationName=UNICODE_CI]                                   4230           4271          58         19.8          50.4       1.0X
+execBinaryICU                                                       6412           6471          83         13.1          76.4       0.7X
+execBinary                                                          1432           1441          14         58.6          17.1       3.0X
+execLowercase                                                       4293           4354          86         19.5          51.2       1.0X
+
+
+================================================================================================
+[wc=10000000, wl=16, capitalized=false]
+================================================================================================
+
+OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.8.0-1016-aws
+Intel(R) Xeon(R) CPU E5-2686 v4 @ 2.30GHz
+InitCap evaluation [wc=10000000, wl=16, capitalized=false]:  Best Time(ms)   Avg Time(ms)   Stdev(ms)    Rate(M/s)   Per Row(ns)   Relative
+------------------------------------------------------------------------------------------------------------------------------------------
+execICU[collationName=he_ISR]                                        4362           4382          28         19.2          52.0       1.0X
+execICU[collationName=UNICODE]                                       4321           4322           2         19.4          51.5       1.0X
+execICU[collationName=UNICODE_CI]                                    4256           4286          43         19.7          50.7       1.0X
+execBinaryICU                                                        6373           6415          58         13.2          76.0       0.7X
+execBinary                                                           1430           1439          13         58.7          17.0       3.1X
+execLowercase                                                        4262           4263           1         19.7          50.8       1.0X
+
+
