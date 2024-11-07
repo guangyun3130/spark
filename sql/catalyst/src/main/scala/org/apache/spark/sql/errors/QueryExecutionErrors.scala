@@ -636,21 +636,31 @@ private[sql] object QueryExecutionErrors extends QueryErrorsBase with ExecutionE
       summary = "")
   }
 
-  def intervalArithmeticOverflowError(
+  def withTrySuggestionIntervalArithmeticOverflowError(
       message: String,
       hint: String = "",
-      context: QueryContext): ArithmeticException = {
+      context: QueryContext = null): ArithmeticException = {
     val alternative = if (hint.nonEmpty) {
       s" Use '$hint' to tolerate overflow and return NULL instead."
     } else ""
     new SparkArithmeticException(
-      errorClass = "INTERVAL_ARITHMETIC_OVERFLOW",
+      errorClass = "INTERVAL_ARITHMETIC_OVERFLOW.WITH_TRY_SUGGESTION",
       messageParameters = Map(
         "message" -> message,
         "alternative" -> alternative),
       context = getQueryContext(context),
       summary = getSummary(context))
   }
+
+  def withoutSuggestionIntervalArithmeticOverflowError(
+    context: QueryContext = null): SparkArithmeticException = {
+    new SparkArithmeticException(
+      errorClass = "INTERVAL_ARITHMETIC_OVERFLOW.WITHOUT_SUGGESTION",
+      messageParameters = Map(),
+      context = getQueryContext(context),
+      summary = getSummary(context))
+  }
+
 
   def failedToCompileMsg(e: Exception): String = {
     s"Failed to compile: $e"
