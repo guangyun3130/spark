@@ -979,9 +979,10 @@ class AstBuilder extends DataTypeAstBuilder
    * Add ORDER BY/SORT BY/CLUSTER BY/DISTRIBUTE BY/LIMIT/WINDOWS clauses to the logical plan. These
    * clauses determine the shape (ordering/partitioning/rows) of the query result.
    *
-   * If 'forPipeOperators' is true, throws an error if the WINDOW clause is present (since this is
-   * not currently supported) or if more than one clause is present (this can be useful when parsing
-   * clauses used with pipe operations which only allow one instance of these clauses each).
+   * If 'forPipeOperators' is true, throws an error if the WINDOW clause is present (since it breaks
+   * the composability of the pipe operators) or if more than one clause is present (this can be
+   * useful when parsing clauses used with pipe operations which only allow one instance of these
+   * clauses each).
    */
   private def withQueryResultClauses(
       ctx: QueryOrganizationContext,
@@ -5894,10 +5895,13 @@ class AstBuilder extends DataTypeAstBuilder
         whereClause = null,
         aggregationClause = null,
         havingClause = null,
-        windowClause = null,
+        windowClause = ctx.windowClause,
         relation = left,
         isPipeOperatorSelect = true)
     }.getOrElse(Option(ctx.whereClause).map { c =>
+      if (ctx.windowClause() != null) {
+        throw QueryParsingErrors.windowClauseInOperatorPipeWhereClauseNotAllowedError(ctx)
+      }
       withWhereClause(c, withSubqueryAlias())
     }.getOrElse(Option(ctx.pivotClause()).map { c =>
       if (ctx.unpivotClause() != null) {
